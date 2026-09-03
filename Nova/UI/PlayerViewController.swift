@@ -39,6 +39,8 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
 
     override func loadView() {
         view = dropView
+        // Layer-backed, so the panel's fades and resize animate rather than snapping.
+        view.wantsLayer = true
 
         let videoView = engine.videoView
         videoView.translatesAutoresizingMaskIntoConstraints = false

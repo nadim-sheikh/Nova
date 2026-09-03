@@ -33,7 +33,17 @@ final class PlayerControlPanel: NSVisualEffectView {
     var isFull = true {
         didSet {
             guard isFull != oldValue else { return }
-            applyLayout(animated: true)
+            updateButtonsForState()
+            guard isTimelineExpanded, window != nil else { return }
+            track.showsDetail = isFull
+            let height = isFull ? Self.fullTrackHeight : Self.compactTrackHeight
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.24
+                context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                context.allowsImplicitAnimation = true
+                trackHeight?.animator().constant = height
+                superview?.layoutSubtreeIfNeeded()
+            }
         }
     }
 
@@ -56,6 +66,7 @@ final class PlayerControlPanel: NSVisualEffectView {
     private var trackHeight: NSLayoutConstraint?
     private var trackSpacing: NSLayoutConstraint?
     private var isSliderScrubbing = false
+    private var layoutGeneration = 0
     private var duration: Double = 0
     private var isPlaying = false
 
@@ -172,34 +183,76 @@ final class PlayerControlPanel: NSVisualEffectView {
         applyLayout(animated: true)
     }
 
-    /// Shows the controls that apply to the current state and sizes the panel to fit them.
-    private func applyLayout(animated: Bool) {
-        let expanded = isTimelineExpanded
-        for view in [elapsedLabel, scrubber, remainingLabel] as [NSView] {
-            view.isHidden = expanded
-        }
-        for view in [timecodeField, copyButton, pasteButton, spacer, endLabel, sizeButton] as [NSView] {
-            view.isHidden = !expanded
-        }
-        track.isHidden = !expanded
-        track.showsDetail = isFull
-        trackHeight?.constant = expanded ? (isFull ? Self.fullTrackHeight : Self.compactTrackHeight) : 0
-        trackSpacing?.constant = expanded ? 6 : 0
+    /// Controls that belong to each state. The panel morphs between the two sets.
+    private var transportOnlyViews: [NSView] { [elapsedLabel, scrubber, remainingLabel] }
+    private var timelineOnlyViews: [NSView] { [timecodeField, copyButton, pasteButton, endLabel, sizeButton, track] }
 
+    /// Cross-fades between the transport and timeline states while the panel resizes, so the
+    /// change reads as one movement instead of controls popping in and out.
+    private func applyLayout(animated: Bool) {
+        layoutGeneration += 1
+        let generation = layoutGeneration
+        updateButtonsForState()
+        guard animated, window != nil else {
+            settleLayout(animated: false)
+            return
+        }
+        let leaving = isTimelineExpanded ? transportOnlyViews : timelineOnlyViews
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.11
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            leaving.filter { !$0.isHidden }.forEach { $0.animator().alphaValue = 0 }
+        }, completionHandler: { [weak self] in
+            // A second toggle during the fade supersedes this one and settles the panel itself.
+            guard let self, self.layoutGeneration == generation else { return }
+            self.settleLayout(animated: true)
+        })
+    }
+
+    /// Puts every control into the state's final arrangement, fading in whatever now applies.
+    private func settleLayout(animated: Bool) {
+        let expanded = isTimelineExpanded
+        let leaving = expanded ? transportOnlyViews : timelineOnlyViews
+        let arriving = expanded ? timelineOnlyViews : transportOnlyViews
+        for view in leaving {
+            view.isHidden = true
+            view.alphaValue = 1
+        }
+        spacer.isHidden = !expanded
+        for view in arriving {
+            view.alphaValue = animated ? 0 : 1
+            view.isHidden = false
+        }
+        track.showsDetail = isFull
+        let height = expanded ? (isFull ? Self.fullTrackHeight : Self.compactTrackHeight) : 0
+        let spacing: CGFloat = expanded ? 6 : 0
+        guard animated else {
+            trackHeight?.constant = height
+            trackSpacing?.constant = spacing
+            superview?.layoutSubtreeIfNeeded()
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.26
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            context.allowsImplicitAnimation = true
+            // Animating the constraints themselves: implicit animation alone leaves the panel's
+            // height to snap, because Auto Layout applies the new size in one pass.
+            trackHeight?.animator().constant = height
+            trackSpacing?.animator().constant = spacing
+            arriving.forEach { $0.animator().alphaValue = 1 }
+            superview?.layoutSubtreeIfNeeded()
+        }
+    }
+
+    private func updateButtonsForState() {
         let symbol = isFull ? "rectangle.compress.vertical" : "rectangle.expand.vertical"
         let sizeDescription = isFull ? "Compact Timeline" : "Full-Size Timeline"
         sizeButton.image = Self.symbolImage(symbol, description: sizeDescription)
         sizeButton.toolTip = sizeDescription
-        let timelineDescription = expanded ? "Collapse Timeline" : "Expand Timeline"
+        let timelineDescription = isTimelineExpanded ? "Collapse Timeline" : "Expand Timeline"
         timelineButton.toolTip = timelineDescription
-        timelineButton.contentTintColor = expanded ? .controlAccentColor : .labelColor
-
-        guard animated, window != nil else { return }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            context.allowsImplicitAnimation = true
-            superview?.layoutSubtreeIfNeeded()
-        }
+        timelineButton.contentTintColor = isTimelineExpanded ? .controlAccentColor : .labelColor
     }
 
     // MARK: - State

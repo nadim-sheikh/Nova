@@ -12,6 +12,8 @@ final class ReadoutField: NSTextField, NSTextFieldDelegate {
     init(minimumWidth: CGFloat, description: String) {
         self.minimumWidth = minimumWidth
         super.init(frame: .zero)
+        // A centring cell, so the text sits in the middle of the pill instead of against its top.
+        cell = CenteredTextFieldCell(textCell: "")
         font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         textColor = .white
         backgroundColor = NSColor.white.withAlphaComponent(0.14)
@@ -71,8 +73,10 @@ final class ReadoutField: NSTextField, NSTextFieldDelegate {
     }
 
     override var intrinsicContentSize: NSSize {
-        NSSize(width: max(super.intrinsicContentSize.width + 16, minimumWidth), height: 22)
+        NSSize(width: max(super.intrinsicContentSize.width + 16, minimumWidth), height: ReadoutField.height)
     }
+
+    static let height: CGFloat = 22
 
     // MARK: - NSTextFieldDelegate
 

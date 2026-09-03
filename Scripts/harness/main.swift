@@ -330,7 +330,17 @@ func testTimelineAndFloat(_ controller: PlayerWindowController, engine: any Play
     let item = NSMenuItem(title: "", action: #selector(PlayerViewController.toggleTimeline(_:)), keyEquivalent: "")
     _ = vc.validateMenuItem(item)
     check(item.title == "Expand Timeline", "menu offers Expand Timeline", item.title)
-    vc.toggleTimeline(); await sleep(0.5)
+    // Sample the panel while it opens: a morph moves through intermediate heights.
+    vc.toggleTimeline()
+    var heights: [CGFloat] = []
+    for _ in 0..<9 {
+        await sleep(0.045)
+        heights.append(panel.frame.height)
+    }
+    let intermediates = heights.filter { $0 > collapsedHeight + 1 && $0 < heights.last! - 1 }
+    print("     panel heights while opening: " + heights.map { String(format: "%.0f", $0) }.joined(separator: " "))
+    check(!intermediates.isEmpty, "panel animates through intermediate heights", "\(intermediates.count) samples between \(Int(collapsedHeight)) and \(Int(heights.last ?? 0))")
+    await sleep(0.5)
     _ = vc.validateMenuItem(item)
     check(item.title == "Collapse Timeline", "menu offers Collapse Timeline after toggle", item.title)
     check(panel.isTimelineExpanded, "panel reports the timeline open")
@@ -346,6 +356,30 @@ func testTimelineAndFloat(_ controller: PlayerWindowController, engine: any Play
     let spread = (centres.max() ?? 0) - (centres.min() ?? 0)
     check(spread < 0.6, "panel row controls are aligned", String(format: "spread %.2f pt across %d controls", spread, centres.count))
     _ = windowScreenshot(window); saveShot("panel-timeline-full")
+
+    // The morph must settle: nothing left part-faded, and the right controls hidden.
+    let visible = (parts.row?.arrangedSubviews ?? []).filter { !$0.isHidden }
+    check(visible.allSatisfy { $0.alphaValue > 0.99 }, "every visible control finished fading in",
+          visible.map { String(format: "%.2f", $0.alphaValue) }.joined(separator: " "))
+    check(parts.track?.alphaValue ?? 0 > 0.99, "track finished fading in", String(format: "%.2f", parts.track?.alphaValue ?? 0))
+
+    // Toggling twice in quick succession must still settle correctly.
+    vc.toggleTimeline(); await sleep(0.05); vc.toggleTimeline(); await sleep(1.0)
+    check(panel.isTimelineExpanded, "fast double toggle leaves the timeline open")
+    let afterDouble = panelParts(panel)
+    let visibleAfter = (afterDouble.row?.arrangedSubviews ?? []).filter { !$0.isHidden }
+    check(visibleAfter.allSatisfy { $0.alphaValue > 0.99 }, "fast double toggle settles every control",
+          visibleAfter.map { String(format: "%.2f", $0.alphaValue) }.joined(separator: " "))
+    check(afterDouble.fields.first?.isHidden == false && afterDouble.sliders.filter { !$0.isHidden }.count == 1,
+          "fast double toggle keeps the timeline layout")
+
+    // The timecode text sits in the middle of its pill.
+    if let field = parts.fields.first, let cell = field.cell {
+        let title = cell.titleRect(forBounds: field.bounds)
+        check(abs(title.midY - field.bounds.midY) < 0.6, "timecode text is vertically centred",
+              String(format: "text midY %.2f vs field midY %.2f", title.midY, field.bounds.midY))
+        check(field.frame.height == ReadoutField.height, "timecode field keeps its height", "\(field.frame.height)")
+    }
 
     // Clicking the track a quarter of the way along seeks to that frame.
     if let track = parts.track {
