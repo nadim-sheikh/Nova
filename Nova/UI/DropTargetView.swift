@@ -23,10 +23,11 @@ final class DropTargetView: NSView {
         if let trackingArea {
             removeTrackingArea(trackingArea)
         }
-        // Rect-based, so movement over the engine's own views still reaches us.
+        // Rect-based, so movement over the engine's own views still reaches us, and active
+        // always: the controls should appear even when another app holds focus.
         let area = NSTrackingArea(
             rect: .zero,
-            options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
             owner: self, userInfo: nil
         )
         addTrackingArea(area)

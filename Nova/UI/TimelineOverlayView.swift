@@ -1,22 +1,25 @@
 import AppKit
 
 /// A full-width precision scrubber that slides over the bottom of the video when expanded, so the
-/// playhead can be placed accurately without hunting for the small slider in the control bar.
+/// playhead can be placed accurately. Its header is one aligned row: an editable timecode with
+/// copy and paste buttons, an editable frame number, the clip's end, and the size toggle.
 /// Comes in two sizes: compact (readouts and track) and full (adds tick labels and a taller track).
 final class TimelineOverlayView: NSVisualEffectView {
-    static let compactHeight: CGFloat = 68
-    static let fullHeight: CGFloat = 116
+    static let compactHeight: CGFloat = 64
+    static let fullHeight: CGFloat = 112
 
     var onScrub: ((Int) -> Void)? {
         get { track.onScrub }
         set { track.onScrub = newValue }
     }
     var onCopyTimecode: (() -> Void)?
+    var onPasteTimecode: (() -> Void)?
     var onEnterTimecode: ((String) -> Void)?
+    var onEnterFrame: ((String) -> Void)?
     var onToggleSize: (() -> Void)?
 
     var isScrubbing: Bool { track.isScrubbing }
-    var isEditingTimecode: Bool { timecodeField.isEditing }
+    var isEditingReadout: Bool { timecodeField.isEditing || frameField.isEditing }
 
     /// Full shows tick labels on a taller track; compact keeps just the essentials.
     var isFull = true {
@@ -27,10 +30,12 @@ final class TimelineOverlayView: NSVisualEffectView {
     }
 
     private let track = TimelineTrackView()
-    private let timecodeField = TimecodeField()
-    private let copyButton = NSButton()
-    private let frameLabel = NSTextField(labelWithString: "")
+    private let timecodeField = ReadoutField(minimumWidth: 108, description: "Type a timecode and press Return to jump to it")
+    private let frameField = ReadoutField(minimumWidth: 62, description: "Type a frame number and press Return to jump to it")
+    private let frameLabel = NSTextField(labelWithString: "Frame")
     private let endLabel = NSTextField(labelWithString: "")
+    private let copyButton = NSButton()
+    private let pasteButton = NSButton()
     private let sizeButton = NSButton()
     private var heightConstraint: NSLayoutConstraint?
 
@@ -44,16 +49,33 @@ final class TimelineOverlayView: NSVisualEffectView {
         alphaValue = 0
 
         timecodeField.onCommit = { [weak self] text in self?.onEnterTimecode?(text) }
+        frameField.onCommit = { [weak self] text in self?.onEnterFrame?(text) }
         configure(copyButton, symbol: "doc.on.doc", description: "Copy Timecode", action: #selector(copyTapped(_:)))
+        configure(pasteButton, symbol: "doc.on.clipboard", description: "Paste Timecode", action: #selector(pasteTapped(_:)))
         configure(sizeButton, symbol: "rectangle.compress.vertical", description: "Compact Timeline", action: #selector(sizeTapped(_:)))
         for label in [frameLabel, endLabel] {
-            label.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
-            label.textColor = NSColor.white.withAlphaComponent(0.85)
+            label.font = .systemFont(ofSize: 11, weight: .medium)
+            label.textColor = NSColor.white.withAlphaComponent(0.6)
             label.setContentCompressionResistancePriority(.required, for: .horizontal)
+            label.setContentHuggingPriority(.required, for: .horizontal)
         }
-        endLabel.textColor = NSColor.white.withAlphaComponent(0.6)
+        endLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
 
-        for view in [timecodeField, copyButton, frameLabel, endLabel, sizeButton, track] as [NSView] {
+        // A spacer with no hugging pushes everything after it to the right edge.
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // One centre-aligned row, so the fields, icons and labels share a middle line exactly.
+        let header = NSStackView(views: [
+            timecodeField, copyButton, pasteButton, frameLabel, frameField, spacer, endLabel, sizeButton,
+        ])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 6
+        header.setCustomSpacing(16, after: pasteButton)
+        header.setCustomSpacing(12, after: spacer)
+        header.setCustomSpacing(14, after: endLabel)
+
+        for view in [header, track] as [NSView] {
             view.translatesAutoresizingMaskIntoConstraints = false
             addSubview(view)
         }
@@ -61,24 +83,20 @@ final class TimelineOverlayView: NSVisualEffectView {
         heightConstraint = height
         NSLayoutConstraint.activate([
             height,
-            timecodeField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            timecodeField.topAnchor.constraint(equalTo: topAnchor, constant: 10),
-            copyButton.leadingAnchor.constraint(equalTo: timecodeField.trailingAnchor, constant: 6),
-            copyButton.centerYAnchor.constraint(equalTo: timecodeField.centerYAnchor),
-            copyButton.widthAnchor.constraint(equalToConstant: 24),
-            copyButton.heightAnchor.constraint(equalToConstant: 24),
-            frameLabel.leadingAnchor.constraint(equalTo: copyButton.trailingAnchor, constant: 12),
-            frameLabel.centerYAnchor.constraint(equalTo: timecodeField.centerYAnchor),
-            sizeButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            sizeButton.centerYAnchor.constraint(equalTo: timecodeField.centerYAnchor),
-            sizeButton.widthAnchor.constraint(equalToConstant: 24),
-            sizeButton.heightAnchor.constraint(equalToConstant: 24),
-            endLabel.trailingAnchor.constraint(equalTo: sizeButton.leadingAnchor, constant: -12),
-            endLabel.centerYAnchor.constraint(equalTo: timecodeField.centerYAnchor),
+            header.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            header.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            header.topAnchor.constraint(equalTo: topAnchor, constant: 9),
+            header.heightAnchor.constraint(equalToConstant: 24),
             track.leadingAnchor.constraint(equalTo: leadingAnchor),
             track.trailingAnchor.constraint(equalTo: trailingAnchor),
-            track.topAnchor.constraint(equalTo: timecodeField.bottomAnchor, constant: 4),
+            track.topAnchor.constraint(equalTo: header.bottomAnchor),
             track.bottomAnchor.constraint(equalTo: bottomAnchor),
+            copyButton.widthAnchor.constraint(equalToConstant: 20),
+            copyButton.heightAnchor.constraint(equalToConstant: 20),
+            pasteButton.widthAnchor.constraint(equalToConstant: 20),
+            pasteButton.heightAnchor.constraint(equalToConstant: 20),
+            sizeButton.widthAnchor.constraint(equalToConstant: 20),
+            sizeButton.heightAnchor.constraint(equalToConstant: 20),
         ])
         applySize()
     }
@@ -89,11 +107,13 @@ final class TimelineOverlayView: NSVisualEffectView {
 
     override var mouseDownCanMoveWindow: Bool { false }
 
-    func update(frameIndex: Int, frameCount: Int, frameRate: Double) {
+    var height: CGFloat { isFull ? Self.fullHeight : Self.compactHeight }
+
+    func update(frameIndex: Int, frameCount: Int, frameRate: Double, frameNumberBase: Int) {
         track.update(frameIndex: frameIndex, frameCount: frameCount, frameRate: frameRate)
         guard frameRate > 0 else { return }
         timecodeField.show(Timecode(frameCount: frameIndex, frameRate: frameRate).smpteString)
-        frameLabel.stringValue = "Frame \(frameIndex)"
+        frameField.show(String(frameIndex + frameNumberBase))
         endLabel.stringValue = frameCount > 0 ? Timecode(frameCount: frameCount - 1, frameRate: frameRate).smpteString : ""
     }
 
@@ -105,8 +125,9 @@ final class TimelineOverlayView: NSVisualEffectView {
                 animator().alphaValue = 1
             }
         } else {
-            if timecodeField.isEditing {
+            if isEditingReadout {
                 timecodeField.cancel()
+                frameField.cancel()
             }
             NSAnimationContext.runAnimationGroup({ context in
                 context.duration = 0.2
@@ -119,26 +140,19 @@ final class TimelineOverlayView: NSVisualEffectView {
     }
 
     private func applySize() {
-        heightConstraint?.constant = isFull ? Self.fullHeight : Self.compactHeight
+        heightConstraint?.constant = height
         track.showsDetail = isFull
         let symbol = isFull ? "rectangle.compress.vertical" : "rectangle.expand.vertical"
         let description = isFull ? "Compact Timeline" : "Full-Size Timeline"
         sizeButton.image = Self.symbolImage(symbol, description: description)
         sizeButton.toolTip = description
-        if let window, !isHidden {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.2
-                context.allowsImplicitAnimation = true
-                window.layoutIfNeeded()
-            }
-        }
     }
 
     private func configure(_ button: NSButton, symbol: String, description: String, action: Selector) {
         button.isBordered = false
         button.image = Self.symbolImage(symbol, description: description)
         button.imageScaling = .scaleProportionallyDown
-        button.contentTintColor = .white
+        button.contentTintColor = NSColor.white.withAlphaComponent(0.85)
         button.refusesFirstResponder = true
         button.toolTip = description
         button.target = self
@@ -147,11 +161,15 @@ final class TimelineOverlayView: NSVisualEffectView {
 
     private static func symbolImage(_ name: String, description: String) -> NSImage? {
         NSImage(systemSymbolName: name, accessibilityDescription: description)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 13, weight: .semibold))
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold))
     }
 
     @objc private func copyTapped(_ sender: Any?) {
         onCopyTimecode?()
+    }
+
+    @objc private func pasteTapped(_ sender: Any?) {
+        onPasteTimecode?()
     }
 
     @objc private func sizeTapped(_ sender: Any?) {

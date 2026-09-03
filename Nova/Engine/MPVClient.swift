@@ -14,6 +14,8 @@ final class MPVClient: @unchecked Sendable {
 
     enum Event {
         case fileLoaded
+        /// The video output was configured for the current file: its size is now known.
+        case videoReconfigured
         /// `error` is an mpv error code when loading or decoding failed, nil for a normal end or stop.
         case endOfFile(error: Int32?)
         case playbackRestarted
@@ -179,6 +181,8 @@ final class MPVClient: @unchecked Sendable {
             }
             let info = data.pointee
             return .endOfFile(error: info.reason == MPV_END_FILE_REASON_ERROR ? info.error : nil)
+        case MPV_EVENT_VIDEO_RECONFIG:
+            return .videoReconfigured
         case MPV_EVENT_PLAYBACK_RESTART:
             return .playbackRestarted
         case MPV_EVENT_PROPERTY_CHANGE:

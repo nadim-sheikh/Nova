@@ -4,6 +4,7 @@ import AVKit
 import UniformTypeIdentifiers
 
 /// `PlaybackEngine` backed by AVPlayer, rendering through AVPlayerView's own Metal path.
+/// Transport controls live in the UI layer, not here.
 @MainActor
 final class AVFoundationEngine: PlaybackEngine {
     private let player = AVPlayer()
@@ -46,8 +47,8 @@ final class AVFoundationEngine: PlaybackEngine {
 
     init() {
         playerView.player = player
-        playerView.controlsStyle = .floating
-        playerView.showsFullScreenToggleButton = true
+        // Nova draws its own transport bar for both engines, so AVKit's floating controls stay off.
+        playerView.controlsStyle = .none
         // Live Text analysis of paused frames costs memory and CPU for no benefit here.
         playerView.allowsVideoFrameAnalysis = false
         player.actionAtItemEnd = .pause

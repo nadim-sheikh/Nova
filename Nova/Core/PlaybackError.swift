@@ -15,6 +15,7 @@ enum PlaybackError: LocalizedError {
     case frameCaptureFailed(underlying: Error?)
     case frameSaveFailed(underlying: Error?)
     case invalidTimecode(String)
+    case invalidFrameNumber(String)
     case noTimecodeOnClipboard
 
     var errorDescription: String? {
@@ -58,6 +59,8 @@ enum PlaybackError: LocalizedError {
             return "The frame couldn't be written to that location."
         case .invalidTimecode(let text):
             return "“\(text)” isn't a timecode. Use hours:minutes:seconds:frames, for example 00:01:23:12."
+        case .invalidFrameNumber(let text):
+            return "“\(text)” isn't a frame number. Type a whole number, for example 120."
         case .noTimecodeOnClipboard:
             return "The clipboard doesn't contain any text to read a timecode from."
         }

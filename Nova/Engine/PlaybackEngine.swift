@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// engine (for example libmpv) can replace AVFoundation without touching any UI code.
 @MainActor
 protocol PlaybackEngine: AnyObject {
-    /// The engine's own rendering surface, including any built-in transport controls.
+    /// The engine's rendering surface. Transport controls are the UI layer's job.
     var videoView: NSView { get }
     /// Video formats this engine can decode, used to populate the open dialog.
     var supportedContentTypes: [UTType] { get }

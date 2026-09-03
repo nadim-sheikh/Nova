@@ -5,7 +5,7 @@ import UniformTypeIdentifiers
 
 /// `PlaybackEngine` backed by libmpv, which decodes every container and codec ffmpeg knows
 /// (MKV, WebM, AVI, WMV, FLV, DNxHD, VP9, AV1 and so on). Video is drawn by `MPVRenderLayer`
-/// and the transport controls live in `MPVVideoView`. The mpv core is only started on first use.
+/// the UI layer supplies the transport controls. The mpv core is only started on first use.
 ///
 /// Reverse playback is not delegated to mpv: its backward mode drops frames whenever a GOP
 /// outgrows its reversal buffer and is documented as unsafe with hardware decoding. Instead the
@@ -17,7 +17,7 @@ final class MPVEngine: PlaybackEngine {
     private static let loadTimeoutNanoseconds: UInt64 = 10_000_000_000
 
     private var client: MPVClient?
-    private var hostView: MPVVideoView?
+    private var hostView: MPVRenderView?
     /// Kept separately so `deinit` can free the render context without touching view state.
     private var renderLayer: MPVRenderLayer?
     private var isFileLoaded = false
@@ -26,6 +26,9 @@ final class MPVEngine: PlaybackEngine {
     /// frame or so after the audio, and frame 0 must be the first picture, not the first sound.
     private var timeOrigin: Double = 0
     private var restartsSinceLoad = 0
+    /// mpv keeps the previous file's `dwidth`/`dheight` until it configures video output for the
+    /// new one, so the size is only trusted after this file's first reconfiguration.
+    private var reconfigsSinceLoad = 0
     private var restartContinuation: CheckedContinuation<Void, Error>?
     private var pendingSeekSeconds: Double?
     private var isPaused = true
@@ -152,23 +155,11 @@ final class MPVEngine: PlaybackEngine {
         didSet { set("loop-file", string: isLooping ? "inf" : "no") }
     }
 
-    private var view: MPVVideoView {
+    private var view: MPVRenderView {
         if let hostView { return hostView }
-        let view = MPVVideoView()
-        view.controlBar.onPlayPause = { [weak self] in
-            guard let self else { return }
-            if self.isPlaying { self.pause() } else { self.play() }
-        }
-        view.controlBar.onScrub = { [weak self] seconds, isFinal in
-            guard let self else { return }
-            if isFinal {
-                self.seek(to: CMTime(seconds: seconds, preferredTimescale: MPVEngine.timescale))
-            } else {
-                self.seek(toSeconds: seconds, exact: false)
-            }
-        }
+        let view = MPVRenderView()
         hostView = view
-        renderLayer = view.renderView.renderLayer
+        renderLayer = view.renderLayer
         return view
     }
 
@@ -186,7 +177,7 @@ final class MPVEngine: PlaybackEngine {
                 client.observe(name, format: format)
             }
             // mpv discards video that has no render context to go to, so attach before any file loads.
-            try view.renderView.renderLayer.attachRenderContext(to: client)
+            try view.renderLayer.attachRenderContext(to: client)
         } catch {
             client.destroy()
             throw error
@@ -212,6 +203,7 @@ final class MPVEngine: PlaybackEngine {
         unload()
         do {
             restartsSinceLoad = 0
+            reconfigsSinceLoad = 0
             try client.command(["loadfile", url.path, "replace"])
             try await waitForFileLoaded()
             guard let track = client.string("vid"), track != "no" else {
@@ -232,7 +224,6 @@ final class MPVEngine: PlaybackEngine {
             isPaused = client.flag("pause") ?? true
             isAtEnd = false
             isFileLoaded = true
-            refreshControls()
             onTimeUpdate?(currentTime)
             onStateChange?()
         } catch let error as PlaybackError {
@@ -263,7 +254,6 @@ final class MPVEngine: PlaybackEngine {
         naturalSize = .zero
         duration = .invalid
         frameDuration = .invalid
-        refreshControls()
     }
 
     private func waitForFileLoaded() async throws {
@@ -273,9 +263,9 @@ final class MPVEngine: PlaybackEngine {
         }
     }
 
-    /// The display size only becomes known once the first frame has been decoded.
+    /// The display size only becomes known once mpv has configured video output for this file.
     private func waitForVideoSize() async throws -> CGSize {
-        if let size = currentVideoSize() {
+        if reconfigsSinceLoad > 0, let size = currentVideoSize() {
             loadTimeout?.cancel()
             return size
         }
@@ -326,6 +316,13 @@ final class MPVEngine: PlaybackEngine {
         restartContinuation = nil
     }
 
+    private func resumeVideoSizeIfKnown() {
+        guard videoSizeContinuation != nil, reconfigsSinceLoad > 0, let size = currentVideoSize() else { return }
+        loadTimeout?.cancel()
+        videoSizeContinuation?.resume(returning: size)
+        videoSizeContinuation = nil
+    }
+
     private func currentVideoSize() -> CGSize? {
         guard let client,
               let width = client.int("dwidth"), let height = client.int("dheight"),
@@ -347,6 +344,9 @@ final class MPVEngine: PlaybackEngine {
         case .endOfFile(let error):
             guard let error else { return }
             failPendingLoad(with: PlaybackError.loadFailed(underlying: MPVError(code: error, operation: "Opening the file")))
+        case .videoReconfigured:
+            reconfigsSinceLoad += 1
+            resumeVideoSizeIfKnown()
         case .playbackRestarted:
             restartsSinceLoad += 1
             restartContinuation?.resume()
@@ -356,7 +356,6 @@ final class MPVEngine: PlaybackEngine {
             reverseSeekInFlight = false
             if isFileLoaded {
                 onTimeUpdate?(currentTime)
-                refreshControls()
             }
         case .propertyChanged(let name, let value):
             handlePropertyChange(name, value)
@@ -372,13 +371,11 @@ final class MPVEngine: PlaybackEngine {
             pendingSeekSeconds = nil
             if isFileLoaded {
                 onTimeUpdate?(currentTime)
-                refreshControls()
             }
         case ("pause", .flag(let paused)):
             isPaused = paused
             if isFileLoaded {
                 onStateChange?()
-                refreshControls()
             }
         case ("speed", .double(let newSpeed)):
             speed = newSpeed
@@ -388,27 +385,13 @@ final class MPVEngine: PlaybackEngine {
         case ("duration", .double(let seconds)):
             if isFileLoaded {
                 duration = CMTime(seconds: max(0, seconds - timeOrigin), preferredTimescale: Self.timescale)
-                refreshControls()
+                onStateChange?()
             }
         case ("dwidth", _), ("dheight", _):
-            if videoSizeContinuation != nil, let size = currentVideoSize() {
-                loadTimeout?.cancel()
-                videoSizeContinuation?.resume(returning: size)
-                videoSizeContinuation = nil
-            }
+            resumeVideoSizeIfKnown()
         default:
             break
         }
-    }
-
-    private func refreshControls() {
-        guard let hostView else { return }
-        let time = currentTime
-        hostView.controlBar.update(
-            time: time.isNumeric ? time.seconds : 0,
-            duration: duration.isNumeric ? duration.seconds : 0,
-            isPlaying: isPlaying
-        )
     }
 
     // MARK: - Transport
@@ -431,7 +414,6 @@ final class MPVEngine: PlaybackEngine {
         set("pause", flag: true)
         if wasReversing {
             onStateChange?()
-            refreshControls()
         }
     }
 
@@ -454,7 +436,6 @@ final class MPVEngine: PlaybackEngine {
         pendingSeekSeconds = target
         client?.run(["seek", String(target + timeOrigin), exact ? "absolute+exact" : "absolute+keyframes"])
         onTimeUpdate?(currentTime)
-        refreshControls()
     }
 
     func stepFrames(_ count: Int) {
@@ -482,7 +463,6 @@ final class MPVEngine: PlaybackEngine {
             set("pause", flag: false)
         }
         onStateChange?()
-        refreshControls()
     }
 
     // MARK: - Reverse shuttle

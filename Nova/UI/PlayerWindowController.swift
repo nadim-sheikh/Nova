@@ -18,6 +18,8 @@ final class PlayerWindowController: NSWindowController, NSMenuItemValidation {
         window.contentMinSize = NSSize(width: 280, height: 160)
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.isReleasedWhenClosed = false
+        // Needed for the mouse-moved monitor that reveals the transport bar.
+        window.acceptsMouseMovedEvents = true
         // Nova opens its own window, so macOS never needs to restore one (or ask to after a crash).
         window.isRestorable = false
         window.contentViewController = playerViewController

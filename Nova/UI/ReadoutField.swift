@@ -1,19 +1,20 @@
 import AppKit
 
-/// The timecode readout inside the timeline: shows the current SMPTE timecode, and becomes a
-/// text field when clicked so a timecode can be typed and jumped to with Return. Escape puts
-/// the live value back. Text can be selected and copied like any field.
-final class TimecodeField: NSTextField, NSTextFieldDelegate {
+/// A readout in the timeline that can be typed into: it shows a live value, and clicking it starts
+/// an edit that Return commits and Escape cancels. Text can be selected and copied like any field.
+final class ReadoutField: NSTextField, NSTextFieldDelegate {
     /// Called with the typed text when the user presses Return.
     var onCommit: ((String) -> Void)?
 
     private var liveValue = ""
+    private let minimumWidth: CGFloat
 
-    init() {
+    init(minimumWidth: CGFloat, description: String) {
+        self.minimumWidth = minimumWidth
         super.init(frame: .zero)
-        font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+        font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         textColor = .white
-        backgroundColor = NSColor.black.withAlphaComponent(0.35)
+        backgroundColor = NSColor.white.withAlphaComponent(0.14)
         drawsBackground = true
         isBezeled = false
         isBordered = false
@@ -23,7 +24,7 @@ final class TimecodeField: NSTextField, NSTextFieldDelegate {
         usesSingleLineMode = true
         lineBreakMode = .byClipping
         alignment = .center
-        toolTip = "Click to type a timecode, then press Return to jump to it"
+        toolTip = description
         wantsLayer = true
         layer?.cornerRadius = 5
         layer?.masksToBounds = true
@@ -39,10 +40,10 @@ final class TimecodeField: NSTextField, NSTextFieldDelegate {
     var isEditing: Bool { currentEditor() != nil }
 
     /// Updates the readout unless the user is typing in it.
-    func show(_ timecode: String) {
-        liveValue = timecode
+    func show(_ value: String) {
+        liveValue = value
         guard !isEditing else { return }
-        stringValue = timecode
+        stringValue = value
     }
 
     /// Hands the typed text on and ends editing.
@@ -53,7 +54,6 @@ final class TimecodeField: NSTextField, NSTextFieldDelegate {
     }
 
     func cancel() {
-        stringValue = liveValue
         endEditing()
     }
 
@@ -71,10 +71,7 @@ final class TimecodeField: NSTextField, NSTextFieldDelegate {
     }
 
     override var intrinsicContentSize: NSSize {
-        var size = super.intrinsicContentSize
-        size.width = max(size.width, 108) + 16
-        size.height = 24
-        return size
+        NSSize(width: max(super.intrinsicContentSize.width + 16, minimumWidth), height: 22)
     }
 
     // MARK: - NSTextFieldDelegate
