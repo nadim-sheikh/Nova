@@ -20,6 +20,7 @@ final class AppSettings {
         case frameNumberBase
         case floatOnTop
         case timelineStyle
+        case defaultPlayhead
 
         /// Key path used by Cocoa bindings against `NSUserDefaultsController.shared`.
         var bindingKeyPath: String { "values.\(rawValue)" }
@@ -50,6 +51,7 @@ final class AppSettings {
         Key.frameNumberBase.rawValue: 0,
         Key.floatOnTop.rawValue: false,
         Key.timelineStyle.rawValue: 1,
+        Key.defaultPlayhead.rawValue: 0,
     ]
 
     private static let shuttleSpeedLadder: [Float] = [1, 2, 4, 8, 16, 32]
@@ -84,6 +86,11 @@ final class AppSettings {
     var timelineIsFull: Bool {
         get { defaults.integer(forKey: Key.timelineStyle.rawValue) != 0 }
         set { defaults.set(newValue ? 1 : 0, forKey: Key.timelineStyle.rawValue) }
+    }
+
+    /// Which playhead a file opens with: the normal slider (0) or the timecode timeline (1).
+    var opensWithTimecodePlayhead: Bool {
+        defaults.integer(forKey: Key.defaultPlayhead.rawValue) == 1
     }
 
     var seekStepSeconds: Double {

@@ -9,8 +9,10 @@ final class GeneralSettingsViewController: NSViewController {
             ("Window", SettingsForm.checkbox("Resize to the video's size when a file opens", key: .fitWindowToVideo)),
             ("", SettingsForm.checkbox("Keep the video's aspect ratio while resizing", key: .lockAspectRatio)),
             ("", SettingsForm.checkbox("Float on top of other apps", key: .floatOnTop)),
-            ("Timeline", SettingsForm.popUp([("Full size", 1), ("Compact", 0)], key: .timelineStyle)),
-            ("", SettingsForm.note("Press T or click the timeline button in the playback controls to open it inside them. Its timecode can be typed into, and the button beside it switches between the two sizes.")),
+            ("Default playhead", SettingsForm.popUp([("Normal", 0), ("Timecode", 1)], key: .defaultPlayhead)),
+            ("", SettingsForm.note("Normal opens a file with the slider and clock times. Timecode opens the timeline, with an editable SMPTE timecode and a frame-accurate track.")),
+            ("Timeline size", SettingsForm.popUp([("Full size", 1), ("Compact", 0)], key: .timelineStyle)),
+            ("", SettingsForm.note("Press T or click the timeline button in the playback controls to switch playheads at any time. The button beside it changes the timeline's size.")),
         ], footer: reset)
     }
 

@@ -107,6 +107,8 @@ final class PlayerControlPanel: NSVisualEffectView {
         scrubber.setContentHuggingPriority(.defaultLow, for: .horizontal)
         configure(volumeSlider, action: #selector(volumeMoved(_:)))
         volumeSlider.doubleValue = 1
+        // Digits and separators only: a timecode field should never accept a word.
+        timecodeField.formatter = TimecodeInputFormatter()
         timecodeField.onCommit = { [weak self] text in self?.onEnterTimecode?(text) }
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
 

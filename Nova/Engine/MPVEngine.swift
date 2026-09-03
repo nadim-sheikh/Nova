@@ -26,8 +26,9 @@ final class MPVEngine: PlaybackEngine {
     /// frame or so after the audio, and frame 0 must be the first picture, not the first sound.
     private var timeOrigin: Double = 0
     private var restartsSinceLoad = 0
-    /// mpv keeps the previous file's `dwidth`/`dheight` until it configures video output for the
-    /// new one, so the size is only trusted after this file's first reconfiguration.
+    /// mpv keeps the previous file's `dwidth`/`dheight` until this file's first frame is on
+    /// screen, so the size is only trusted after playback has restarted for it. A video
+    /// reconfiguration alone is not enough: tearing the old file down emits one too.
     private var reconfigsSinceLoad = 0
     private var restartContinuation: CheckedContinuation<Void, Error>?
     private var pendingSeekSeconds: Double?
@@ -209,11 +210,12 @@ final class MPVEngine: PlaybackEngine {
             guard let track = client.string("vid"), track != "no" else {
                 throw videoTrackError(client)
             }
+            // Wait for the first picture before reading anything about it: only then do the size
+            // and the timestamp belong to this file. Its timestamp is the frame-0 origin.
+            try await waitForPlaybackRestart()
             let size = try await waitForVideoSize()
             let fps = client.double("container-fps") ?? client.double("estimated-vf-fps") ?? 0
             guard fps > 0 else { throw PlaybackError.unknownFrameRate }
-            // Once playback has settled on the first picture, its timestamp is the frame-0 origin.
-            try await waitForPlaybackRestart()
 
             frameRate = fps
             frameDuration = Self.frameDuration(for: fps)
@@ -263,9 +265,9 @@ final class MPVEngine: PlaybackEngine {
         }
     }
 
-    /// The display size only becomes known once mpv has configured video output for this file.
+    /// The display size is only this file's once its first frame has been shown.
     private func waitForVideoSize() async throws -> CGSize {
-        if reconfigsSinceLoad > 0, let size = currentVideoSize() {
+        if restartsSinceLoad > 0, let size = currentVideoSize() {
             loadTimeout?.cancel()
             return size
         }
@@ -317,7 +319,7 @@ final class MPVEngine: PlaybackEngine {
     }
 
     private func resumeVideoSizeIfKnown() {
-        guard videoSizeContinuation != nil, reconfigsSinceLoad > 0, let size = currentVideoSize() else { return }
+        guard videoSizeContinuation != nil, restartsSinceLoad > 0, let size = currentVideoSize() else { return }
         loadTimeout?.cancel()
         videoSizeContinuation?.resume(returning: size)
         videoSizeContinuation = nil
@@ -349,6 +351,7 @@ final class MPVEngine: PlaybackEngine {
             resumeVideoSizeIfKnown()
         case .playbackRestarted:
             restartsSinceLoad += 1
+            resumeVideoSizeIfKnown()
             restartContinuation?.resume()
             restartContinuation = nil
             loadTimeout?.cancel()

@@ -101,6 +101,23 @@ func captureNumber(_ engine: any PlaybackEngine) async -> String {
 func onScreenNumber(_ window: NSWindow, _ engine: any PlaybackEngine) -> String {
     onScreenFrameNumber(window, sourceWidth: engine.naturalSize.width)
 }
+
+/// Window captures can hand back the previously composited surface, so the reading is polled
+/// until it agrees with the engine. The time taken is reported: a window that never settles is
+/// a real fault, one that settles in a frame or two is the capture lagging.
+@MainActor
+func onScreenNumber(_ window: NSWindow, _ engine: any PlaybackEngine, expecting expected: String) async -> (value: String, seconds: Double) {
+    // A covered window stops being redrawn, so bring it to the front before reading it.
+    NSApp.activate(ignoringOtherApps: true)
+    window.orderFrontRegardless()
+    let start = Date()
+    var value = onScreenNumber(window, engine)
+    while value != expected, Date().timeIntervalSince(start) < 1.5 {
+        await sleep(0.2)
+        value = onScreenNumber(window, engine)
+    }
+    return (value, Date().timeIntervalSince(start))
+}
 func saveShot(_ label: String) {
     let source = FileManager.default.temporaryDirectory.appendingPathComponent("harness-shot.png")
     let target = URL(fileURLWithPath: "shots/\(label).png")
@@ -161,16 +178,9 @@ func testEngine(_ engine: any PlaybackEngine, window: NSWindow, url: URL, expect
     check(frameIndex(engine) == 100, "\(name) seek to frame 100", "index=\(frameIndex(engine))")
     let n100 = await captureNumber(engine)
     check(n100 == "100", "\(name) capture after seek", "ocr=\(n100)")
-    let onScreen100 = onScreenNumber(window, engine)
-    check(onScreen100 == "100", "\(name) on-screen frame after seek", "ocr=\(onScreen100)")
-    if onScreen100 != "100" {
-        saveShot("\(name)-seek100")
-        await sleep(1.0)
-        print("     retry after 1s: on-screen=\(onScreenNumber(window, engine)) capture=\(await captureNumber(engine))")
-        engine.videoView.needsDisplay = true
-        await sleep(0.5)
-        print("     after needsDisplay: on-screen=\(onScreenNumber(window, engine))")
-    }
+    let onScreen100 = await onScreenNumber(window, engine, expecting: "100")
+    check(onScreen100.value == "100", "\(name) on-screen frame after seek", String(format: "read %@ after %.1fs", onScreen100.value, onScreen100.seconds))
+    if onScreen100.value != "100" { saveShot("\(name)-seek100") }
 
     engine.play(); await sleep(1.0)
     check(engine.isPlaying && engine.rate == 1, "\(name) playing", "rate=\(engine.rate)")
@@ -180,9 +190,10 @@ func testEngine(_ engine: any PlaybackEngine, window: NSWindow, url: URL, expect
     let pausedIndex = frameIndex(engine)
     let pausedCapture = await captureNumber(engine)
     check(pausedCapture == String(pausedIndex), "\(name) paused capture matches index", "index=\(pausedIndex) ocr=\(pausedCapture)")
-    let onScreenPaused = onScreenNumber(window, engine)
-    check(onScreenPaused == String(pausedIndex), "\(name) paused on-screen matches index", "index=\(pausedIndex) ocr=\(onScreenPaused)")
-    if onScreenPaused != String(pausedIndex) { saveShot("\(name)-paused\(pausedIndex)") }
+    let onScreenPaused = await onScreenNumber(window, engine, expecting: String(pausedIndex))
+    check(onScreenPaused.value == String(pausedIndex), "\(name) paused on-screen matches index",
+          String(format: "index=%d read %@ after %.1fs", pausedIndex, onScreenPaused.value, onScreenPaused.seconds))
+    if onScreenPaused.value != String(pausedIndex) { saveShot("\(name)-paused\(pausedIndex)") }
     let timecode = Timecode(frameCount: pausedIndex, frameRate: engine.frameRate)
     print("     timecode at pause: \(timecode.smpteString)")
 
@@ -313,6 +324,35 @@ func testControlPanel(_ controller: PlayerWindowController, engine: any Playback
     engine.pause(); await sleep(0.3)
 }
 
+/// Settings > General decides whether a file opens with the normal slider or the timecode timeline.
+@MainActor
+func testDefaultPlayhead(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL) async {
+    print("=== default playhead setting")
+    let vc = controller.playerViewController
+    guard let panel = panelOf(vc) else { check(false, "player panel"); return }
+    let defaults = UserDefaults.standard
+    let original = defaults.integer(forKey: "defaultPlayhead")
+
+    defaults.set(1, forKey: "defaultPlayhead")
+    engine.unload(); await sleep(0.2)
+    vc.open(url)
+    for _ in 0..<40 where !engine.isPlaying { await sleep(0.25) }
+    await sleep(0.8)
+    check(panel.isTimelineExpanded, "timecode playhead opens the timeline with the file")
+    engine.pause(); await sleep(0.2)
+
+    defaults.set(0, forKey: "defaultPlayhead")
+    engine.unload(); await sleep(0.2)
+    vc.open(url)
+    for _ in 0..<40 where !engine.isPlaying { await sleep(0.25) }
+    await sleep(0.8)
+    check(!panel.isTimelineExpanded, "normal playhead opens with the slider")
+    check(panelParts(panel).sliders.filter { !$0.isHidden }.count == 2, "normal playhead shows the scrubber")
+    engine.pause(); await sleep(0.2)
+
+    defaults.set(original, forKey: "defaultPlayhead")
+}
+
 @MainActor
 func testTimelineAndFloat(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL) async {
     print("=== timeline inside the panel, and float on top")
@@ -372,6 +412,29 @@ func testTimelineAndFloat(_ controller: PlayerWindowController, engine: any Play
           visibleAfter.map { String(format: "%.2f", $0.alphaValue) }.joined(separator: " "))
     check(afterDouble.fields.first?.isHidden == false && afterDouble.sliders.filter { !$0.isHidden }.count == 1,
           "fast double toggle keeps the timeline layout")
+
+    // The field takes digits and separators only, so a word can never be typed into it.
+    if let field = parts.fields.first {
+        check(field.formatter is TimecodeInputFormatter, "timecode field has the digits-only formatter")
+        for text in ["1", "00:", "00:01:23;12", "00.01.23.12", "12315"] {
+            check(TimecodeInputFormatter.isValid(text), "accepts “\(text)”")
+        }
+        for text in ["a", "00:0a", "hello", "00:01:23:12x", "-1", "00:00:00:00:00:0"] {
+            check(!TimecodeInputFormatter.isValid(text), "refuses “\(text)”")
+        }
+        // Typing a letter into the live field must leave the text untouched.
+        window.makeFirstResponder(field)
+        await sleep(0.2)
+        let before = field.stringValue
+        field.currentEditor()?.insertText("a")
+        await sleep(0.2)
+        check(field.stringValue == before, "typing a letter is rejected by the field", "“\(field.stringValue)”")
+        field.currentEditor()?.insertText("5")
+        await sleep(0.2)
+        check(field.stringValue != before, "typing a digit is accepted", "“\(field.stringValue)”")
+        field.cancel()
+        await sleep(0.2)
+    }
 
     // The timecode text sits in the middle of its pill.
     if let field = parts.fields.first, let cell = field.cell {
@@ -522,6 +585,7 @@ func start() {
         testMenus(controller, engine: engine)
         if let first = clips.first { await testTimelineAndFloat(controller, engine: engine, url: first) }
         for url in clips.prefix(2) { await testControlPanel(controller, engine: engine, url: url) }
+        if let first = clips.first { await testDefaultPlayhead(controller, engine: engine, url: first) }
         print("=== \(passes) passed, \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

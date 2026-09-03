@@ -39,8 +39,6 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
 
     override func loadView() {
         view = dropView
-        // Layer-backed, so the panel's fades and resize animate rather than snapping.
-        view.wantsLayer = true
 
         let videoView = engine.videoView
         videoView.translatesAutoresizingMaskIntoConstraints = false
@@ -158,7 +156,9 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
             updateTitle()
             updateReadouts()
             revealControls()
-            if !hasMedia, isTimelineExpanded {
+            // Each file opens with the playhead chosen in Settings; T still switches at any time.
+            let wantsTimeline = hasMedia && settings.opensWithTimecodePlayhead
+            if wantsTimeline != isTimelineExpanded {
                 toggleTimeline()
             }
         }
