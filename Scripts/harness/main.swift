@@ -259,79 +259,96 @@ func moveMouse(in window: NSWindow) {
 }
 
 @MainActor
-func testControlBar(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL) async {
+func panelOf(_ vc: PlayerViewController) -> PlayerControlPanel? {
+    vc.view.subviews.compactMap { $0 as? PlayerControlPanel }.first
+}
+
+@MainActor
+func panelParts(_ panel: PlayerControlPanel) -> (row: NSStackView?, buttons: [NSButton], sliders: [NSSlider], fields: [ReadoutField], track: TimelineTrackView?) {
+    let row = panel.subviews.compactMap { $0 as? NSStackView }.first
+    let items = row?.arrangedSubviews ?? []
+    return (
+        row,
+        items.compactMap { $0 as? NSButton },
+        items.compactMap { $0 as? NSSlider },
+        items.compactMap { $0 as? ReadoutField },
+        panel.subviews.compactMap { $0 as? TimelineTrackView }.first
+    )
+}
+
+@MainActor
+func testControlPanel(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL) async {
     let name = url.lastPathComponent
-    print("=== transport bar with \(name)")
+    print("=== player panel with \(name)")
     let vc = controller.playerViewController
     guard let window = controller.window else { check(false, "window"); return }
     engine.unload(); await sleep(0.2)
     vc.open(url)
     for _ in 0..<40 where !engine.isPlaying { await sleep(0.25) }
     check(vc.hasMedia, "\(name) opened")
-    guard let bar = vc.view.subviews.compactMap({ $0 as? PlayerControlBar }).first else {
-        check(false, "\(name) control bar exists"); return
-    }
+    guard let panel = panelOf(vc) else { check(false, "\(name) player panel exists"); return }
+    check(panel.frame.width == vc.view.frame.width - 32, "\(name) panel fills the window width", "\(panel.frame.width) vs \(vc.view.frame.width - 32)")
+
     // It fades out on its own; moving the pointer over the video must bring it back.
     await sleep(3.5)
-    check(bar.alphaValue < 0.1, "\(name) bar fades when idle", String(format: "alpha %.2f", bar.alphaValue))
+    check(panel.alphaValue < 0.1, "\(name) panel fades when idle", String(format: "alpha %.2f", panel.alphaValue))
     moveMouse(in: window)
     await sleep(0.6)
-    check(bar.alphaValue > 0.9, "\(name) bar returns on mouse move", String(format: "alpha %.2f", bar.alphaValue))
-    _ = windowScreenshot(window); saveShot("bar-\(name)")
+    check(panel.alphaValue > 0.9, "\(name) panel returns on mouse move", String(format: "alpha %.2f", panel.alphaValue))
+    _ = windowScreenshot(window); saveShot("panel-\(name)")
 
-    let buttons = bar.subviews.compactMap { $0 as? NSStackView }.flatMap(\.arrangedSubviews).compactMap { $0 as? NSButton }
-    check(buttons.contains { $0.toolTip == "Expand Timeline" || $0.toolTip == "Collapse Timeline" }, "\(name) bar has the timeline button")
-    check(buttons.contains { $0.toolTip == "Full Screen" }, "\(name) bar has a full screen button")
+    let parts = panelParts(panel)
+    check(parts.buttons.contains { $0.toolTip == "Expand Timeline" }, "\(name) panel has the timeline button")
+    check(parts.buttons.contains { $0.toolTip == "Full Screen" }, "\(name) panel has a full screen button")
+    check(parts.sliders.count == 2, "\(name) collapsed panel shows scrubber and volume", "\(parts.sliders.count)")
     let wasPlaying = engine.isPlaying
-    buttons.first { $0.toolTip == "Play" || $0.toolTip == "Pause" }?.performClick(nil); await sleep(0.5)
+    parts.buttons.first { $0.toolTip == "Play" || $0.toolTip == "Pause" }?.performClick(nil); await sleep(0.5)
     check(engine.isPlaying != wasPlaying, "\(name) play button toggles playback")
-    let sliders = bar.subviews.compactMap { $0 as? NSStackView }.flatMap(\.arrangedSubviews).compactMap { $0 as? NSSlider }
-    check(sliders.count == 2, "\(name) bar has scrubber and volume sliders", "\(sliders.count)")
-    if let volume = sliders.last {
+    if let volume = parts.sliders.last {
         volume.doubleValue = 0.4
         volume.sendAction(volume.action, to: volume.target); await sleep(0.3)
         check(abs(engine.volume - 0.4) < 0.01, "\(name) volume slider sets the volume", "\(engine.volume)")
         engine.volume = 1
     }
-    if !engine.isPlaying { engine.play() }
-    await sleep(0.3)
-    engine.pause()
+    engine.pause(); await sleep(0.3)
 }
 
 @MainActor
 func testTimelineAndFloat(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL) async {
-    print("=== timeline and float on top with \(url.lastPathComponent)")
+    print("=== timeline inside the panel, and float on top")
     let vc = controller.playerViewController
     guard let window = controller.window else { check(false, "window"); return }
-    // hasMedia may still be true from the previous file, so wait for this load to finish playing.
     engine.unload(); await sleep(0.2)
     vc.open(url)
     for _ in 0..<40 where !engine.isPlaying { await sleep(0.25) }
     check(vc.hasMedia && engine.isPlaying, "opened for timeline test")
     engine.pause(); await sleep(0.4)
-    check(!engine.isPlaying, "paused before timeline test")
+    guard let panel = panelOf(vc) else { check(false, "player panel exists"); return }
+    let collapsedHeight = panel.frame.height
+    check(!panel.isTimelineExpanded, "timeline starts closed")
 
     let item = NSMenuItem(title: "", action: #selector(PlayerViewController.toggleTimeline(_:)), keyEquivalent: "")
     _ = vc.validateMenuItem(item)
     check(item.title == "Expand Timeline", "menu offers Expand Timeline", item.title)
-    vc.toggleTimeline(); await sleep(0.4)
+    vc.toggleTimeline(); await sleep(0.5)
     _ = vc.validateMenuItem(item)
     check(item.title == "Collapse Timeline", "menu offers Collapse Timeline after toggle", item.title)
-    let overlay = vc.view.subviews.compactMap { $0 as? TimelineOverlayView }.first
-    check(overlay != nil && overlay?.isHidden == false && (overlay?.alphaValue ?? 0) > 0.99, "timeline overlay visible")
-    check(overlay?.frame.width == vc.view.frame.width, "timeline spans the full window width", "\(overlay?.frame.width ?? 0) vs \(vc.view.frame.width)")
-    let bar = vc.view.subviews.compactMap { $0 as? PlayerControlBar }.first
-    check(bar != nil, "player control bar present")
-    check(bar?.isTimelineExpanded == true, "control bar shows the timeline as active")
-    if let bar {
-        check(abs(bar.frame.width - (vc.view.frame.width - 32)) < 1, "control bar fills the window width", "\(bar.frame.width) vs \(vc.view.frame.width - 32)")
-        // The player view is not flipped, so "above" means a higher y.
-        check(bar.frame.minY >= (overlay?.frame.maxY ?? 0) - 1, "control bar sits above the open timeline", "bar=\(bar.frame.minY) timeline=\(overlay?.frame.maxY ?? 0)")
-    }
-    _ = windowScreenshot(window); saveShot("timeline-expanded")
+    check(panel.isTimelineExpanded, "panel reports the timeline open")
+    check(panel.frame.height > collapsedHeight + 20, "the one panel grows for the timeline", "\(collapsedHeight) -> \(panel.frame.height)")
 
-    // Click on the track a quarter of the way along and check the engine lands on that frame.
-    if let overlay, let track = overlay.subviews.compactMap({ $0 as? TimelineTrackView }).first {
+    var parts = panelParts(panel)
+    check(parts.track?.isHidden == false, "precision track is inside the panel")
+    check(parts.fields.count == 1, "panel has one editable timecode field and no frame readout", "\(parts.fields.count)")
+    let visibleSliders = parts.sliders.filter { !$0.isHidden }
+    check(visibleSliders.count == 1, "coarse scrubber gives way to the track", "\(visibleSliders.count) visible sliders")
+    // Every visible control in the row shares one centre line.
+    let centres = (parts.row?.arrangedSubviews ?? []).filter { !$0.isHidden && $0.frame.width > 1 }.map { $0.frame.midY }
+    let spread = (centres.max() ?? 0) - (centres.min() ?? 0)
+    check(spread < 0.6, "panel row controls are aligned", String(format: "spread %.2f pt across %d controls", spread, centres.count))
+    _ = windowScreenshot(window); saveShot("panel-timeline-full")
+
+    // Clicking the track a quarter of the way along seeks to that frame.
+    if let track = parts.track {
         let total = Timecode.frameCount(seconds: engine.duration.seconds, frameRate: engine.frameRate)
         let inset: CGFloat = 20
         let fraction: CGFloat = 0.25
@@ -345,81 +362,57 @@ func testTimelineAndFloat(_ controller: PlayerWindowController, engine: any Play
             track.mouseDown(with: down)
             track.mouseUp(with: up)
             await sleep(0.8)
-            check(frameIndex(engine) == expected, "timeline click seeks to the clicked frame", "index=\(frameIndex(engine)) expected=\(expected)")
+            check(frameIndex(engine) == expected, "track click seeks to the clicked frame", "index=\(frameIndex(engine)) expected=\(expected)")
             let shown = await captureNumber(engine)
-            check(shown == String(expected), "frame after timeline click", "ocr=\(shown)")
+            check(shown == String(expected), "frame after track click", "ocr=\(shown)")
         } else {
             check(false, "synthetic mouse event")
         }
     } else {
-        check(false, "timeline track view found")
+        check(false, "track view found")
     }
-    // Typed timecode, the copy button, and the size toggle.
-    // Every header control shares one centre line.
-    if let overlay, let header = overlay.subviews.compactMap({ $0 as? NSStackView }).first {
-        let centres = header.arrangedSubviews.filter { $0.frame.width > 1 }.map { $0.frame.midY }
-        let spread = (centres.max() ?? 0) - (centres.min() ?? 0)
-        check(spread < 0.6, "timeline header controls are aligned", String(format: "spread %.2f pt across %d controls", spread, centres.count))
-        check(header.alignment == .centerY, "header stack is centre-aligned")
-    } else {
-        check(false, "timeline header found")
-    }
-    let fields = overlay.map { o in o.subviews.compactMap { $0 as? NSStackView }.flatMap(\.arrangedSubviews).compactMap { $0 as? ReadoutField } } ?? []
-    check(fields.count == 2, "timeline has editable timecode and frame fields", "\(fields.count)")
-    if let overlay, let field = fields.first {
-        let shown = Timecode(frameCount: frameIndex(engine), frameRate: engine.frameRate).smpteString
-        check(field.stringValue == shown, "timecode field shows the current timecode", "\(field.stringValue) vs \(shown)")
+
+    // Typing a timecode, and the copy and paste buttons.
+    if let field = parts.fields.first {
+        check(field.stringValue == Timecode(frameCount: frameIndex(engine), frameRate: engine.frameRate).smpteString,
+              "timecode field shows the current timecode", field.stringValue)
         field.stringValue = "00:00:02:00"
         field.commit(); await sleep(0.8)
         let typed = TimecodeParser.parse("00:00:02:00", frameRate: engine.frameRate)?.frameCount(frameRate: engine.frameRate) ?? -1
         check(frameIndex(engine) == typed, "typed timecode jumps to that frame", "index=\(frameIndex(engine)) expected=\(typed)")
-        check(field.stringValue == Timecode(frameCount: typed, frameRate: engine.frameRate).smpteString, "field shows the new position", field.stringValue)
         let ocrTyped = await captureNumber(engine)
         check(ocrTyped == String(typed), "frame after typed timecode", "ocr=\(ocrTyped)")
         NSPasteboard.general.clearContents()
-        let buttons = overlay.subviews.compactMap { $0 as? NSStackView }.flatMap(\.arrangedSubviews).compactMap { $0 as? NSButton }
-        let copyButton = buttons.first { $0.toolTip == "Copy Timecode" }
-        copyButton?.performClick(nil); await sleep(0.2)
-        let copied = NSPasteboard.general.string(forType: .string)
-        check(copied == field.stringValue, "timeline copy button copies the timecode", copied ?? "nil")
-
-        // The frame field is editable too, and honours the first-frame-number setting.
-        if let frameField = fields.last {
-            let base = AppSettings.shared.frameNumberBase
-            check(frameField.stringValue == String(frameIndex(engine) + base), "frame field shows the current frame", frameField.stringValue)
-            frameField.stringValue = String(150 + base)
-            frameField.commit(); await sleep(0.8)
-            check(frameIndex(engine) == 150, "typed frame number jumps to that frame", "index=\(frameIndex(engine))")
-            let ocrFrame = await captureNumber(engine)
-            check(ocrFrame == "150", "frame after typed frame number", "ocr=\(ocrFrame)")
-        }
-
-        // Paste button reads the clipboard, like ⌥⌘V.
+        parts.buttons.first { $0.toolTip == "Copy Timecode" }?.performClick(nil); await sleep(0.2)
+        check(NSPasteboard.general.string(forType: .string) == field.stringValue, "copy button copies the timecode",
+              NSPasteboard.general.string(forType: .string) ?? "nil")
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString("00:00:01:00", forType: .string)
-        buttons.first { $0.toolTip == "Paste Timecode" }?.performClick(nil); await sleep(0.8)
+        parts.buttons.first { $0.toolTip == "Paste Timecode" }?.performClick(nil); await sleep(0.8)
         let pasted = TimecodeParser.parse("00:00:01:00", frameRate: engine.frameRate)?.frameCount(frameRate: engine.frameRate) ?? -1
-        check(frameIndex(engine) == pasted, "timeline paste button jumps", "index=\(frameIndex(engine)) expected=\(pasted)")
+        check(frameIndex(engine) == pasted, "paste button jumps", "index=\(frameIndex(engine)) expected=\(pasted)")
     } else {
         check(false, "timecode field found")
     }
-    let sizeSettings = AppSettings.shared
-    let initialFull = sizeSettings.timelineIsFull
-    check(overlay?.isFull == initialFull, "timeline size follows the setting")
-    let sizeButton = overlay?.subviews.compactMap { $0 as? NSStackView }.flatMap(\.arrangedSubviews).compactMap { $0 as? NSButton }.first { $0.toolTip == "Compact Timeline" || $0.toolTip == "Full-Size Timeline" }
-    sizeButton?.performClick(nil); await sleep(0.5)
-    check(sizeSettings.timelineIsFull == !initialFull && overlay?.isFull == !initialFull, "size button flips the setting and the timeline")
-    let expectedHeight = initialFull ? TimelineOverlayView.compactHeight : TimelineOverlayView.fullHeight
-    check(abs((overlay?.frame.height ?? 0) - expectedHeight) < 1, "timeline height changes with size", "\(overlay?.frame.height ?? 0) vs \(expectedHeight)")
-    _ = windowScreenshot(window); saveShot("timeline-\(initialFull ? "compact" : "full")")
-    sizeSettings.timelineIsFull = initialFull; await sleep(0.5)
-    _ = windowScreenshot(window); saveShot("timeline-\(initialFull ? "full" : "compact")")
-    sizeSettings.timelineIsFull = initialFull; await sleep(0.3)
-    check(overlay?.isFull == initialFull, "timeline size restored from the setting")
-    vc.toggleTimeline(); await sleep(0.4)
-    check(overlay?.isHidden == true, "timeline hidden after collapse")
 
+    // The size button switches the timeline between full and compact, and remembers the choice.
     let settings = AppSettings.shared
+    let initialFull = settings.timelineIsFull
+    check(panel.isFull == initialFull, "timeline size follows the setting")
+    let fullHeight = panel.frame.height
+    parts = panelParts(panel)
+    parts.buttons.first { $0.toolTip == "Compact Timeline" || $0.toolTip == "Full-Size Timeline" }?.performClick(nil)
+    await sleep(0.6)
+    check(settings.timelineIsFull == !initialFull && panel.isFull == !initialFull, "size button flips the setting and the panel")
+    check(panel.frame.height != fullHeight, "panel height changes with the size", "\(fullHeight) -> \(panel.frame.height)")
+    _ = windowScreenshot(window); saveShot("panel-timeline-compact")
+    settings.timelineIsFull = initialFull; await sleep(0.4)
+    check(panel.isFull == initialFull, "timeline size restored from the setting")
+
+    vc.toggleTimeline(); await sleep(0.5)
+    check(!panel.isTimelineExpanded, "timeline closed again")
+    check(abs(panel.frame.height - collapsedHeight) < 1, "panel returns to its collapsed height", "\(panel.frame.height)")
+
     let before = settings.floatOnTop
     controller.toggleFloatOnTop(nil); await sleep(0.2)
     check(settings.floatOnTop == !before && window.level == (before ? .normal : .floating), "float on top toggles window level", "level=\(window.level.rawValue)")
@@ -494,7 +487,7 @@ func start() {
         }
         testMenus(controller, engine: engine)
         if let first = clips.first { await testTimelineAndFloat(controller, engine: engine, url: first) }
-        for url in clips.prefix(2) { await testControlBar(controller, engine: engine, url: url) }
+        for url in clips.prefix(2) { await testControlPanel(controller, engine: engine, url: url) }
         print("=== \(passes) passed, \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

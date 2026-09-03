@@ -10,9 +10,7 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
     private var shuttle = ShuttleController()
     private let dropView = DropTargetView(frame: NSRect(x: 0, y: 0, width: 960, height: 540))
     private let toast = ToastView()
-    private let timeline = TimelineOverlayView()
-    private let controlBar = PlayerControlBar()
-    private var controlBarBottom: NSLayoutConstraint?
+    private let panel = PlayerControlPanel()
     private var isTimelineExpanded = false
     private var controlsHideTask: Task<Void, Never>?
     private var currentFileName: String?
@@ -45,10 +43,8 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
         let videoView = engine.videoView
         videoView.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(videoView)
-        timeline.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(timeline)
-        controlBar.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(controlBar)
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(panel)
         toast.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(toast)
 
@@ -57,22 +53,15 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
             videoView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             videoView.topAnchor.constraint(equalTo: view.topAnchor),
             videoView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            timeline.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            timeline.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            timeline.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            controlBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            controlBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            panel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            panel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            panel.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16),
             toast.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             toast.topAnchor.constraint(equalTo: view.topAnchor, constant: 16),
             // Keeps the confirmation inside even a very small window; the text truncates instead.
             toast.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 12),
             toast.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -12),
         ])
-
-        // Sits above the timeline when that is open, otherwise just above the window's edge.
-        let bottom = controlBar.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16)
-        bottom.isActive = true
-        controlBarBottom = bottom
 
         let contextMenu = PlayerContextMenu.build(target: self)
         // Set on both views: a right-click lands on one of AVPlayerView's internal subviews and
@@ -85,18 +74,17 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
         super.viewDidLoad()
         dropView.onDropURL = { [weak self] url in self?.open(url) }
         dropView.onMouseMoved = { [weak self] in self?.revealControls() }
-        controlBar.onPlayPause = { [weak self] in self?.togglePlayPause() }
-        controlBar.onScrub = { [weak self] seconds, isFinal in self?.scrub(toSeconds: seconds, isFinal: isFinal) }
-        controlBar.onVolume = { [weak self] volume in self?.engine.volume = volume }
-        controlBar.onToggleTimeline = { [weak self] in self?.toggleTimeline() }
-        controlBar.onToggleFullScreen = { [weak self] in self?.view.window?.toggleFullScreen(nil) }
-        timeline.onScrub = { [weak self] frame in self?.seek(toFrame: frame) }
-        timeline.onCopyTimecode = { [weak self] in self?.copyCurrentTimecode() }
-        timeline.onPasteTimecode = { [weak self] in self?.jumpToPastedTimecode() }
-        timeline.onEnterTimecode = { [weak self] text in self?.jump(toTimecodeText: text) }
-        timeline.onEnterFrame = { [weak self] text in self?.jump(toFrameText: text) }
-        timeline.onToggleSize = { [weak self] in self?.settings.timelineIsFull.toggle() }
-        timeline.isFull = settings.timelineIsFull
+        panel.onPlayPause = { [weak self] in self?.togglePlayPause() }
+        panel.onScrub = { [weak self] seconds, isFinal in self?.scrub(toSeconds: seconds, isFinal: isFinal) }
+        panel.onVolume = { [weak self] volume in self?.engine.volume = volume }
+        panel.onToggleTimeline = { [weak self] in self?.toggleTimeline() }
+        panel.onToggleFullScreen = { [weak self] in self?.view.window?.toggleFullScreen(nil) }
+        panel.onTimelineScrub = { [weak self] frame in self?.seek(toFrame: frame) }
+        panel.onCopyTimecode = { [weak self] in self?.copyCurrentTimecode() }
+        panel.onPasteTimecode = { [weak self] in self?.jumpToPastedTimecode() }
+        panel.onEnterTimecode = { [weak self] text in self?.jump(toTimecodeText: text) }
+        panel.onToggleSize = { [weak self] in self?.settings.timelineIsFull.toggle() }
+        panel.isFull = settings.timelineIsFull
         engine.onTimeUpdate = { [weak self] _ in
             self?.updateTitle()
             self?.updateReadouts()
@@ -180,22 +168,9 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
     func toggleTimeline() {
         guard hasMedia || isTimelineExpanded else { return }
         isTimelineExpanded.toggle()
-        controlBar.isTimelineExpanded = isTimelineExpanded
         updateReadouts()
-        timeline.setExpanded(isTimelineExpanded)
-        layOutControlBar(animated: true)
+        panel.setTimelineExpanded(isTimelineExpanded)
         revealControls()
-    }
-
-    /// Keeps the transport bar clear of the timeline when it is open.
-    private func layOutControlBar(animated: Bool) {
-        controlBarBottom?.constant = isTimelineExpanded ? -(timeline.height + 8) : -16
-        guard animated else { return }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
-            context.allowsImplicitAnimation = true
-            view.layoutSubtreeIfNeeded()
-        }
     }
 
     @objc func toggleTimeline(_ sender: Any?) {
@@ -206,7 +181,7 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
     private func updateReadouts() {
         let time = engine.currentTime
         let duration = engine.duration
-        controlBar.update(
+        panel.updateTransport(
             time: time.isNumeric ? time.seconds : 0,
             duration: duration.isNumeric ? duration.seconds : 0,
             isPlaying: engine.isPlaying,
@@ -214,10 +189,7 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
         )
         guard isTimelineExpanded, hasMedia, engine.frameRate > 0 else { return }
         let frameCount = duration.isNumeric ? Timecode.frameCount(seconds: duration.seconds, frameRate: engine.frameRate) : 0
-        timeline.update(
-            frameIndex: currentFrameIndex(), frameCount: frameCount,
-            frameRate: engine.frameRate, frameNumberBase: settings.frameNumberBase
-        )
+        panel.updateTimeline(frameIndex: currentFrameIndex(), frameCount: frameCount, frameRate: engine.frameRate)
     }
 
     /// Coarse seeking from the transport bar: keyframes while dragging, exact on release.
@@ -238,14 +210,13 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
         guard hasMedia else { return }
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.15
-            controlBar.animator().alphaValue = 1
+            panel.animator().alphaValue = 1
         }
         controlsHideTask?.cancel()
         controlsHideTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: 2_500_000_000)
             guard !Task.isCancelled, let self else { return }
-            if self.isPointerOverControls || self.controlBar.isScrubbing || self.timeline.isScrubbing
-                || self.timeline.isEditingReadout {
+            if self.isPointerOverControls || self.panel.isScrubbing || self.panel.isEditingTimecode {
                 self.revealControls()
                 return
             }
@@ -256,15 +227,14 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
     private func hideControls() {
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.3
-            controlBar.animator().alphaValue = 0
+            panel.animator().alphaValue = 0
         }
     }
 
     private var isPointerOverControls: Bool {
         guard let window = view.window else { return false }
         let point = view.convert(window.mouseLocationOutsideOfEventStream, from: nil)
-        return controlBar.frame.insetBy(dx: 0, dy: -8).contains(point)
-            || (isTimelineExpanded && timeline.frame.contains(point))
+        return panel.frame.insetBy(dx: 0, dy: -8).contains(point)
     }
 
     // MARK: - Frame copying
@@ -321,19 +291,6 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
             return
         }
         jump(toTimecodeText: text, failureTitle: "Couldn't paste a timecode")
-    }
-
-    /// Parses a typed frame number and jumps to it, honouring the first-frame-is-0-or-1 setting.
-    func jump(toFrameText text: String) {
-        guard hasMedia, engine.frameRate > 0 else { return }
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let typed = Int(trimmed) else {
-            presentError(PlaybackError.invalidFrameNumber(String(trimmed.prefix(40))), title: "Couldn't read that frame number")
-            return
-        }
-        let frame = max(0, typed - settings.frameNumberBase)
-        seek(toFrame: frame)
-        toast.show("Jumped to frame \(frame + settings.frameNumberBase)")
     }
 
     /// Parses typed or pasted text as a timecode and jumps to that frame.
@@ -425,10 +382,7 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
 
     private func applySettings() {
         engine.isLooping = settings.loopPlayback
-        if timeline.isFull != settings.timelineIsFull {
-            timeline.isFull = settings.timelineIsFull
-            layOutControlBar(animated: true)
-        }
+        panel.isFull = settings.timelineIsFull
         updateReadouts()
         applyAspectLock()
         updateTitle()
@@ -566,7 +520,7 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
         eventMonitors = [keyDown, keyUp, mouseMoved].compactMap { $0 }
     }
 
-    /// True while a text field (a timeline readout) owns the keyboard; shortcuts stand aside.
+    /// True while the timecode field owns the keyboard; shortcuts stand aside so letters reach it.
     private var isTypingInField: Bool {
         (view.window?.firstResponder as? NSTextView)?.isFieldEditor == true
     }

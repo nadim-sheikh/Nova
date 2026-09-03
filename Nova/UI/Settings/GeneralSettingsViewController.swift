@@ -10,7 +10,7 @@ final class GeneralSettingsViewController: NSViewController {
             ("", SettingsForm.checkbox("Keep the video's aspect ratio while resizing", key: .lockAspectRatio)),
             ("", SettingsForm.checkbox("Float on top of other apps", key: .floatOnTop)),
             ("Timeline", SettingsForm.popUp([("Full size", 1), ("Compact", 0)], key: .timelineStyle)),
-            ("", SettingsForm.note("Press T or click the timeline button in the playback controls to show it. Its timecode and frame number can be typed into, and the button at its right end switches between the two sizes.")),
+            ("", SettingsForm.note("Press T or click the timeline button in the playback controls to open it inside them. Its timecode can be typed into, and the button beside it switches between the two sizes.")),
         ], footer: reset)
     }
 
