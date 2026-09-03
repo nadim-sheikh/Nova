@@ -1,0 +1,19 @@
+# Build products and packaging
+build/
+DerivedData/
+*.dmg
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad
+Nova.xcodeproj/project.xcworkspace/xcuserdata/
+
+# exFAT sidecars and Finder files
+._*
+.DS_Store
+.Spotlight-V100
+.Trashes
+
+# Scratch output
+Scripts/harness/shots/
