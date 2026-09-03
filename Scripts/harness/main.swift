@@ -353,6 +353,96 @@ func testDefaultPlayhead(_ controller: PlayerWindowController, engine: any Playb
     defaults.set(original, forKey: "defaultPlayhead")
 }
 
+/// Drives the real Settings window: does choosing a timeline size reach the player?
+@MainActor
+func testSettingsWindow(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL) async {
+    print("=== settings window")
+    let vc = controller.playerViewController
+    guard let panel = panelOf(vc) else { check(false, "player panel"); return }
+    let defaults = UserDefaults.standard
+    let originalStyle = defaults.integer(forKey: "timelineStyle")
+    defaults.set(1, forKey: "timelineStyle")
+    engine.unload(); await sleep(0.2)
+    vc.open(url)
+    for _ in 0..<40 where !engine.isPlaying { await sleep(0.25) }
+    engine.pause(); await sleep(0.3)
+    if !panel.isTimelineExpanded { vc.toggleTimeline() }
+    await sleep(0.6)
+    let fullHeight = panel.frame.height
+    check(panel.isFull, "panel starts full size")
+
+    let settings = SettingsWindowController()
+    settings.showWindow(nil)
+    await sleep(0.6)
+    guard let tabs = settings.window?.contentViewController as? NSTabViewController else {
+        check(false, "settings tabs"); return
+    }
+    let general = tabs.tabViewItems.first?.viewController
+    _ = general?.view
+    func popUps(in view: NSView) -> [NSPopUpButton] {
+        view.subviews.flatMap { popUps(in: $0) } + view.subviews.compactMap { $0 as? NSPopUpButton }
+    }
+    let allPopUps = general.map { popUps(in: $0.view) } ?? []
+    guard let sizePopUp = allPopUps.first(where: { $0.itemTitles.contains("Full size") }) else {
+        check(false, "timeline size popup found", "\(allPopUps.map { $0.itemTitles })"); return
+    }
+    check(sizePopUp.infoForBinding(.selectedTag) != nil, "size popup is bound to the setting")
+    check(sizePopUp.selectedTag() == 1, "popup shows the current value", "tag \(sizePopUp.selectedTag())")
+
+    // Choose Compact the way a click would: select the item, then send the control's action.
+    sizePopUp.selectItem(withTitle: "Compact")
+    sizePopUp.sendAction(sizePopUp.action, to: sizePopUp.target)
+    await sleep(0.8)
+    check(defaults.integer(forKey: "timelineStyle") == 0, "choosing Compact writes the setting",
+          "stored \(defaults.integer(forKey: "timelineStyle"))")
+    check(!panel.isFull, "player switches to the compact timeline")
+    check(panel.frame.height < fullHeight - 20, "panel shrinks", "\(fullHeight) -> \(panel.frame.height)")
+
+    sizePopUp.selectItem(withTitle: "Full size")
+    sizePopUp.sendAction(sizePopUp.action, to: sizePopUp.target)
+    await sleep(0.8)
+    check(defaults.integer(forKey: "timelineStyle") == 1, "choosing Full size writes the setting")
+    check(panel.isFull && abs(panel.frame.height - fullHeight) < 1, "player switches back to full size", "\(panel.frame.height)")
+
+    // Changing the size with the timeline closed must show the result, not wait for the next file.
+    vc.toggleTimeline(); await sleep(0.6)
+    check(!panel.isTimelineExpanded, "timeline closed for the next check")
+    sizePopUp.selectItem(withTitle: "Compact")
+    sizePopUp.sendAction(sizePopUp.action, to: sizePopUp.target)
+    await sleep(0.9)
+    check(!panel.isFull, "size setting applies while the timeline is closed")
+    check(panel.isTimelineExpanded, "changing the size opens the timeline so the change is visible")
+    check(panel.frame.height < fullHeight - 20, "and it opens at the compact size", "\(panel.frame.height)")
+
+    // The playhead choice switches the player that is already open.
+    guard let playheadPopUp = allPopUps.first(where: { $0.itemTitles.contains("Timecode") }) else {
+        check(false, "playhead popup found"); return
+    }
+    let originalPlayhead = defaults.integer(forKey: "defaultPlayhead")
+    func choosePlayhead(_ title: String) async {
+        playheadPopUp.selectItem(withTitle: title)
+        playheadPopUp.sendAction(playheadPopUp.action, to: playheadPopUp.target)
+        await sleep(0.9)
+    }
+    // Timecode while the timeline is already open: the setting changes, the player stays put.
+    await choosePlayhead("Timecode")
+    check(defaults.integer(forKey: "defaultPlayhead") == 1, "choosing Timecode writes the setting")
+    check(panel.isTimelineExpanded, "Timecode keeps the timeline open")
+    // Switching to Normal closes it on the file already playing.
+    await choosePlayhead("Normal")
+    check(defaults.integer(forKey: "defaultPlayhead") == 0, "choosing Normal writes the setting")
+    check(!panel.isTimelineExpanded, "Normal switches the open player back to the slider")
+    // And back again opens it, without waiting for the next file.
+    await choosePlayhead("Timecode")
+    check(panel.isTimelineExpanded, "Timecode switches the open player to the timeline")
+    defaults.set(originalPlayhead, forKey: "defaultPlayhead")
+    await sleep(0.5)
+
+    settings.close()
+    defaults.set(originalStyle, forKey: "timelineStyle")
+    await sleep(0.3)
+}
+
 @MainActor
 func testTimelineAndFloat(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL) async {
     print("=== timeline inside the panel, and float on top")
@@ -586,6 +676,7 @@ func start() {
         if let first = clips.first { await testTimelineAndFloat(controller, engine: engine, url: first) }
         for url in clips.prefix(2) { await testControlPanel(controller, engine: engine, url: url) }
         if let first = clips.first { await testDefaultPlayhead(controller, engine: engine, url: first) }
+        if let first = clips.first { await testSettingsWindow(controller, engine: engine, url: first) }
         print("=== \(passes) passed, \(failures) failed")
         exit(failures == 0 ? 0 : 1)
     }

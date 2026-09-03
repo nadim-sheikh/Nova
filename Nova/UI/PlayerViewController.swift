@@ -12,6 +12,9 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
     private let toast = ToastView()
     private let panel = PlayerControlPanel()
     private var isTimelineExpanded = false
+    /// Last seen values of the two playhead settings, so a change can be shown as it is made.
+    private var lastTimelineIsFull = AppSettings.shared.timelineIsFull
+    private var lastPlayheadIsTimecode = AppSettings.shared.opensWithTimecodePlayhead
     private var controlsHideTask: Task<Void, Never>?
     private var currentFileName: String?
     private var eventMonitors: [Any] = []
@@ -158,6 +161,7 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
             revealControls()
             // Each file opens with the playhead chosen in Settings; T still switches at any time.
             let wantsTimeline = hasMedia && settings.opensWithTimecodePlayhead
+            lastPlayheadIsTimecode = settings.opensWithTimecodePlayhead
             if wantsTimeline != isTimelineExpanded {
                 toggleTimeline()
             }
@@ -385,6 +389,22 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
     private func applySettings() {
         engine.isLooping = settings.loopPlayback
         panel.isFull = settings.timelineIsFull
+        // A playhead setting is about what the player looks like, so show the result at once
+        // rather than waiting for the next file.
+        if settings.timelineIsFull != lastTimelineIsFull {
+            lastTimelineIsFull = settings.timelineIsFull
+            if hasMedia, !isTimelineExpanded {
+                toggleTimeline()
+            } else {
+                revealControls()
+            }
+        }
+        if settings.opensWithTimecodePlayhead != lastPlayheadIsTimecode {
+            lastPlayheadIsTimecode = settings.opensWithTimecodePlayhead
+            if hasMedia, settings.opensWithTimecodePlayhead != isTimelineExpanded {
+                toggleTimeline()
+            }
+        }
         updateReadouts()
         applyAspectLock()
         updateTitle()

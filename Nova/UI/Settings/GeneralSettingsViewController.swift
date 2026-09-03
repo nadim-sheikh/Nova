@@ -12,7 +12,7 @@ final class GeneralSettingsViewController: NSViewController {
             ("Default playhead", SettingsForm.popUp([("Normal", 0), ("Timecode", 1)], key: .defaultPlayhead)),
             ("", SettingsForm.note("Normal opens a file with the slider and clock times. Timecode opens the timeline, with an editable SMPTE timecode and a frame-accurate track.")),
             ("Timeline size", SettingsForm.popUp([("Full size", 1), ("Compact", 0)], key: .timelineStyle)),
-            ("", SettingsForm.note("Press T or click the timeline button in the playback controls to switch playheads at any time. The button beside it changes the timeline's size.")),
+            ("", SettingsForm.note("Both apply to the file playing now as well as the next one. Press T or click the timeline button in the playback controls to switch playheads at any time.")),
         ], footer: reset)
     }
 
