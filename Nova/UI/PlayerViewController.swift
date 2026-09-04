@@ -478,23 +478,25 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
             window.title = "Nova"
             return
         }
-        let frameIndex = currentFrameIndex()
-
-        var parts = [timecode.smpteString]
-        if settings.showFrameNumber {
-            parts.append("Frame \(frameIndex + settings.frameNumberBase)")
+        // The file name leads; everything else is optional and the panel shows it anyway.
+        var parts: [String] = []
+        if settings.showFileName {
+            parts.append(fileName)
         }
         if settings.showShuttleSpeed, let speed = ShuttleController.speedLabel(for: engine.rate) {
             parts.append(speed)
         }
-        if settings.showFileName {
-            parts.append(fileName)
+        if settings.showTimecodeInTitle {
+            parts.append(timecode.smpteString)
+        }
+        if settings.showFrameNumber {
+            parts.append("Frame \(currentFrameIndex() + settings.frameNumberBase)")
         }
         window.title = Self.fittedTitle(from: parts, availableWidth: Self.titleWidth(in: window))
     }
 
-    /// A title bar can't scroll or wrap, so on a narrow window drop the least important parts
-    /// (file name first, then speed, then the frame number) until the text fits.
+    /// A title bar can't scroll or wrap, so on a narrow window drop parts from the end (frame
+    /// number, then timecode, then speed) until the text fits; the file name stays.
     private static func fittedTitle(from parts: [String], availableWidth: CGFloat) -> String {
         var parts = parts
         while parts.count > 1 {

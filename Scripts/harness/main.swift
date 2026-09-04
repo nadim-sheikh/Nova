@@ -354,6 +354,39 @@ func testConcurrentOpens(_ controller: PlayerWindowController, engine: any Playb
     }
 }
 
+/// The title bar names the file and nothing else unless the Timecode settings add more.
+@MainActor
+func testTitleBar(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL) async {
+    print("=== title bar")
+    let vc = controller.playerViewController
+    let defaults = UserDefaults.standard
+    let saved = ["showTimecodeInTitle", "showFrameNumber", "showShuttleSpeed", "showFileName"].map { ($0, defaults.object(forKey: $0)) }
+    for (key, _) in saved { defaults.removeObject(forKey: key) }
+    engine.unload(); await sleep(0.2)
+    vc.open(url)
+    for _ in 0..<40 where !engine.isPlaying { await sleep(0.25) }
+    engine.pause(); await sleep(0.5)
+    check(controller.window?.title == url.lastPathComponent, "title is the file name alone", controller.window?.title ?? "nil")
+    defaults.set(true, forKey: "showTimecodeInTitle"); await sleep(0.4)
+    let withTimecode = controller.window?.title ?? ""
+    check(withTimecode.hasPrefix(url.lastPathComponent) && withTimecode.contains(":"), "timecode can be added after the name", withTimecode)
+    defaults.set(true, forKey: "showFrameNumber"); await sleep(0.4)
+    check(controller.window?.title.contains("Frame") == true, "frame number can be added too", controller.window?.title ?? "")
+    for (key, value) in saved {
+        if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+    }
+    await sleep(0.3)
+    check(controller.window?.title == url.lastPathComponent, "title returns to the file name", controller.window?.title ?? "nil")
+
+    let page = TimecodeSettingsViewController()
+    _ = page.view
+    func checkboxes(in view: NSView) -> [String] {
+        view.subviews.flatMap { checkboxes(in: $0) } + view.subviews.compactMap { ($0 as? NSButton)?.title }.filter { !$0.isEmpty }
+    }
+    let titles = checkboxes(in: page.view)
+    check(["File name", "Timecode", "Frame number"].allSatisfy(titles.contains), "Timecode settings offer file name, timecode and frame number", "\(titles)")
+}
+
 @MainActor
 func testDefaultPlayhead(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL) async {
     print("=== default playhead setting")
@@ -707,6 +740,7 @@ func start() {
         if clips.count >= 2 {
             await testConcurrentOpens(controller, engine: engine, first: clips[1], second: clips[0])
         }
+        if let first = clips.first { await testTitleBar(controller, engine: engine, url: first) }
         if let first = clips.first { await testDefaultPlayhead(controller, engine: engine, url: first) }
         if let first = clips.first { await testSettingsWindow(controller, engine: engine, url: first) }
         print("=== \(passes) passed, \(failures) failed")

@@ -14,6 +14,7 @@ final class AppSettings {
         case volumeStepPercent
         case shuttleMaxSpeed
         case slowMotionPercent
+        case showTimecodeInTitle
         case showFrameNumber
         case showShuttleSpeed
         case showFileName
@@ -45,7 +46,8 @@ final class AppSettings {
         Key.volumeStepPercent.rawValue: 5,
         Key.shuttleMaxSpeed.rawValue: 8,
         Key.slowMotionPercent.rawValue: 25,
-        Key.showFrameNumber.rawValue: true,
+        Key.showTimecodeInTitle.rawValue: false,
+        Key.showFrameNumber.rawValue: false,
         Key.showShuttleSpeed.rawValue: true,
         Key.showFileName.rawValue: true,
         Key.frameNumberBase.rawValue: 0,
@@ -71,6 +73,8 @@ final class AppSettings {
     var lockAspectRatio: Bool { defaults.bool(forKey: Key.lockAspectRatio.rawValue) }
     var autoplayOnOpen: Bool { defaults.bool(forKey: Key.autoplayOnOpen.rawValue) }
     var loopPlayback: Bool { defaults.bool(forKey: Key.loopPlayback.rawValue) }
+    /// The panel already shows timecode and frame, so the title bar carries them only on request.
+    var showTimecodeInTitle: Bool { defaults.bool(forKey: Key.showTimecodeInTitle.rawValue) }
     var showFrameNumber: Bool { defaults.bool(forKey: Key.showFrameNumber.rawValue) }
     var showShuttleSpeed: Bool { defaults.bool(forKey: Key.showShuttleSpeed.rawValue) }
     var showFileName: Bool { defaults.bool(forKey: Key.showFileName.rawValue) }
