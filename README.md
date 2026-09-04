@@ -6,7 +6,8 @@
 
 <p align="center">
   <strong>The frame-accurate video player for macOS.</strong><br>
-  Plays every codec, steps by the frame, and speaks SMPTE timecode.
+  Plays every codec, steps by the frame, and speaks SMPTE timecode.<br>
+  <sub>Made by Nadim Sheikh · <a href="https://x.com/Nadim_404">@Nadim_404</a></sub>
 </p>
 
 <p align="center">
@@ -118,6 +119,15 @@ ThirdParty/        Prebuilt full-decoder FFmpeg static libraries
 TestMedia/         Small sample clips
 assets/            README images and the original icon sources
 ```
+
+## Developer
+
+Nova is designed and built by **Nadim Sheikh**. Follow [@Nadim_404 on X](https://x.com/Nadim_404) for updates, new releases and what is coming next, and open an [issue](https://github.com/nadim-sheikh/Nova/issues) if something breaks or you want a feature.
+
+<p>
+  <a href="https://x.com/Nadim_404"><img src="https://img.shields.io/badge/X-%40Nadim__404-000?style=for-the-badge&logo=x&logoColor=white" alt="@Nadim_404 on X"></a>
+  <a href="https://github.com/nadim-sheikh"><img src="https://img.shields.io/badge/GitHub-nadim--sheikh-181717?style=for-the-badge&logo=github&logoColor=white" alt="nadim-sheikh on GitHub"></a>
+</p>
 
 ## Licence
 
