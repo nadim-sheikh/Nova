@@ -69,7 +69,11 @@ final class HybridPlaybackEngine: PlaybackEngine {
         }
     }
 
-    func unload() { active.unload() }
+    /// Unloads both engines: the inactive one can still hold a file from a load that was replaced.
+    func unload() {
+        primary.unload()
+        fallback.unload()
+    }
     func play() { active.play() }
     func pause() { active.pause() }
     func seek(to time: CMTime) { active.seek(to: time) }

@@ -325,6 +325,35 @@ func testControlPanel(_ controller: PlayerWindowController, engine: any Playback
 }
 
 /// Settings > General decides whether a file opens with the normal slider or the timecode timeline.
+/// Finder can deliver two open events at once, and a running app gets one per file. Overlapping
+/// loads used to leave one engine playing audio while the other's blank view was on screen.
+@MainActor
+func testConcurrentOpens(_ controller: PlayerWindowController, engine: any PlaybackEngine, first: URL, second: URL) async {
+    print("=== two files opened at once")
+    let vc = controller.playerViewController
+    guard let window = controller.window else { check(false, "window"); return }
+    for attempt in 1...3 {
+        engine.unload(); await sleep(0.3)
+        vc.open(first)
+        if attempt == 3 { await sleep(0.12) }   // also try a second open mid-load
+        vc.open(second)
+        for _ in 0..<40 where !engine.isPlaying { await sleep(0.25) }
+        await sleep(1.2)
+        check(vc.hasMedia, "attempt \(attempt): a file is loaded")
+        // The two clips run at different rates, so the rate says which one won.
+        check(abs(engine.frameRate - 29.97) < 0.1, "attempt \(attempt): the last file opened wins",
+              String(format: "fps %.2f", engine.frameRate))
+        check(engine.naturalSize == CGSize(width: 1280, height: 720), "attempt \(attempt): its size is used", "\(engine.naturalSize)")
+        engine.pause(); await sleep(0.5)
+        let shown = await captureNumber(engine)
+        check(Int(shown) != nil, "attempt \(attempt): video renders", "read \(shown)")
+        let onScreen = await onScreenNumber(window, engine, expecting: shown)
+        check(onScreen.value == shown, "attempt \(attempt): the window shows that frame",
+              String(format: "read %@ want %@ after %.1fs", onScreen.value, shown, onScreen.seconds))
+        if onScreen.value != shown { saveShot("concurrent-\(attempt)") }
+    }
+}
+
 @MainActor
 func testDefaultPlayhead(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL) async {
     print("=== default playhead setting")
@@ -675,6 +704,9 @@ func start() {
         testMenus(controller, engine: engine)
         if let first = clips.first { await testTimelineAndFloat(controller, engine: engine, url: first) }
         for url in clips.prefix(2) { await testControlPanel(controller, engine: engine, url: url) }
+        if clips.count >= 2 {
+            await testConcurrentOpens(controller, engine: engine, first: clips[1], second: clips[0])
+        }
         if let first = clips.first { await testDefaultPlayhead(controller, engine: engine, url: first) }
         if let first = clips.first { await testSettingsWindow(controller, engine: engine, url: first) }
         print("=== \(passes) passed, \(failures) failed")

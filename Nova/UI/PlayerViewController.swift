@@ -17,6 +17,9 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
     private var lastPlayheadIsTimecode = AppSettings.shared.opensWithTimecodePlayhead
     private var controlsHideTask: Task<Void, Never>?
     private var currentFileName: String?
+    /// Counts opens so a load that a newer one has replaced cannot touch the player when it ends.
+    private var openGeneration = 0
+    private var openTask: Task<Void, Never>?
     private var eventMonitors: [Any] = []
     private var settingsObserver: NSObjectProtocol?
 
@@ -140,30 +143,44 @@ final class PlayerViewController: NSViewController, NSMenuItemValidation, NSMenu
             return
         }
 
-        Task { @MainActor in
+        // Opens are serialised and the newest wins. Two files arriving together (Finder can send
+        // several, and a running app gets one event per file) otherwise leave the two engines
+        // fighting: one ends up playing audio while the other's blank view is on screen.
+        openGeneration += 1
+        let generation = openGeneration
+        let previousOpen = openTask
+        // Frees an engine still waiting on a slow or broken file, so this open isn't held up.
+        engine.unload()
+
+        openTask = Task { @MainActor [weak self] in
+            await previousOpen?.value
+            guard let self, generation == self.openGeneration else { return }
             do {
-                try await engine.load(url: url)
-                currentFileName = url.lastPathComponent
-                engine.isLooping = settings.loopPlayback
-                if settings.fitWindowToVideo {
-                    fitWindow(to: engine.naturalSize)
+                try await self.engine.load(url: url)
+                guard generation == self.openGeneration else { return }
+                self.currentFileName = url.lastPathComponent
+                self.engine.isLooping = self.settings.loopPlayback
+                if self.settings.fitWindowToVideo {
+                    self.fitWindow(to: self.engine.naturalSize)
                 }
-                applyAspectLock()
-                if settings.autoplayOnOpen {
-                    engine.play()
+                self.applyAspectLock()
+                if self.settings.autoplayOnOpen {
+                    self.engine.play()
                 }
             } catch {
-                currentFileName = nil
-                presentError(error, title: "Couldn't open “\(url.lastPathComponent)”")
+                guard generation == self.openGeneration else { return }
+                self.currentFileName = nil
+                self.presentError(error, title: "Couldn't open “\(url.lastPathComponent)”")
             }
-            updateTitle()
-            updateReadouts()
-            revealControls()
+            guard generation == self.openGeneration else { return }
+            self.updateTitle()
+            self.updateReadouts()
+            self.revealControls()
             // Each file opens with the playhead chosen in Settings; T still switches at any time.
-            let wantsTimeline = hasMedia && settings.opensWithTimecodePlayhead
-            lastPlayheadIsTimecode = settings.opensWithTimecodePlayhead
-            if wantsTimeline != isTimelineExpanded {
-                toggleTimeline()
+            let wantsTimeline = self.hasMedia && self.settings.opensWithTimecodePlayhead
+            self.lastPlayheadIsTimecode = self.settings.opensWithTimecodePlayhead
+            if wantsTimeline != self.isTimelineExpanded {
+                self.toggleTimeline()
             }
         }
     }
