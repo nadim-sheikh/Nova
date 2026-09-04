@@ -1,10 +1,15 @@
 # Nova
 
-A native macOS video player for frame-accurate review: SMPTE timecode in the title bar, JKL shuttle, single-frame stepping, exact frame copies, and an expandable full-width timeline. AppKit and Swift, macOS 13 or later.
+[![Download Nova 1.0](https://img.shields.io/badge/Download-Nova%201.0%20for%20macOS-3492FA?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/nadim-sheikh/Nova/releases/download/v1.0/Nova-1.0.dmg)
+[![Releases](https://img.shields.io/github/v/release/nadim-sheikh/Nova?style=for-the-badge&label=Latest%20release)](https://github.com/nadim-sheikh/Nova/releases/latest)
 
-## Download
+**[Download the disk image (Nova-1.0.dmg, 41 MB)](https://github.com/nadim-sheikh/Nova/releases/download/v1.0/Nova-1.0.dmg)** for macOS 13 or later, Apple silicon and Intel.
 
-Grab the latest disk image from the [Releases page](https://github.com/nadim-sheikh/Nova/releases/latest), open it, and drag Nova to Applications. It is a universal build for Apple silicon and Intel Macs running macOS 13 or later.
+A native macOS video player for frame-accurate review: SMPTE timecode, JKL shuttle, single-frame stepping, exact frame copies, and a full-width precision timeline that opens inside the playback panel. AppKit and Swift.
+
+## Installing
+
+Download the disk image from the link above or the [Releases page](https://github.com/nadim-sheikh/Nova/releases/latest), open it, and drag Nova to Applications. It is a universal build for Apple silicon and Intel Macs running macOS 13 or later.
 
 The app is signed ad hoc rather than with an Apple Developer ID, so the first launch is refused by Gatekeeper. Either open System Settings > Privacy & Security and click "Open Anyway" next to Nova, or run this once:
 
