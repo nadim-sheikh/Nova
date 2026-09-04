@@ -215,6 +215,97 @@ func testEngine(_ engine: any PlaybackEngine, window: NSWindow, url: URL, expect
     check(abs(engine.volume - 0.5) < 0.001, "\(name) volume")
 }
 
+/// Screenshot mode for the README: the player in its main states, saved as PNGs.
+@MainActor
+func screenshots(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL, outDir: String) async {
+    let vc = controller.playerViewController
+    guard let window = controller.window else { exit(3) }
+    vc.open(url)
+    for _ in 0..<40 where !engine.isPlaying { await sleep(0.25) }
+    await sleep(2.5)
+    engine.pause(); await sleep(0.4)
+    window.setContentSize(NSSize(width: 1280, height: 720)); await sleep(0.4)
+    NSApp.activate(ignoringOtherApps: true); window.orderFrontRegardless()
+    func shot(_ name: String) {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        task.arguments = ["-x", "-o", "-l", String(window.windowNumber), "\(outDir)/\(name).png"]
+        try? task.run(); task.waitUntilExit()
+    }
+    moveMouse(in: window); await sleep(0.5)
+    shot("player")
+    vc.toggleTimeline(); await sleep(0.8)
+    moveMouse(in: window); await sleep(0.3)
+    shot("timeline")
+    AppSettings.shared.timelineIsFull = false; await sleep(0.8)
+    moveMouse(in: window); await sleep(0.3)
+    shot("timeline-compact")
+    AppSettings.shared.timelineIsFull = true; await sleep(0.5)
+    vc.toggleTimeline(); await sleep(0.5)
+    exit(0)
+}
+
+/// Records the player for the README: the panel appearing, the timeline morph, a scrub and the
+/// pointer readout. Frames are grabbed in-process at 1x with their real timestamps and written
+/// out afterwards together with an ffmpeg concat list, so the GIF keeps true timing.
+@MainActor
+func recordFrames(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL, outDir: String) async {
+    let vc = controller.playerViewController
+    guard let window = controller.window else { exit(3) }
+    vc.open(url)
+    for _ in 0..<40 where !engine.isPlaying { await sleep(0.25) }
+    await sleep(1.0)
+    window.setContentSize(NSSize(width: 1280, height: 720)); await sleep(0.5)
+    NSApp.activate(ignoringOtherApps: true); window.orderFrontRegardless()
+    let windowID = CGWindowID(window.windowNumber)
+    let track = panelOf(vc).flatMap { panelParts($0).track }
+    func pointer(_ fraction: CGFloat) -> NSPoint {
+        guard let track else { return .zero }
+        let x = 20 + (track.bounds.width - 40) * fraction
+        return track.convert(NSPoint(x: x, y: track.bounds.midY), to: nil)
+    }
+    func event(_ type: NSEvent.EventType, at point: NSPoint) -> NSEvent? {
+        NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                           windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1)
+    }
+    let actions: [(at: Double, run: () -> Void)] = [
+        (0.4, { moveMouse(in: window) }),
+        (1.3, { vc.toggleTimeline() }),
+        (2.3, { if let e = event(.leftMouseDown, at: pointer(0.12)) { track?.mouseDown(with: e) } }),
+        (4.1, { if let e = event(.leftMouseUp, at: pointer(0.67)) { track?.mouseUp(with: e) } }),
+        (6.2, { vc.toggleTimeline() }),
+    ]
+    var fired = 0
+    var frames: [(time: Double, image: CGImage)] = []
+    let start = Date()
+    var lastGrab = -1.0
+    while true {
+        let t = Date().timeIntervalSince(start)
+        if t > 7.4 { break }
+        while fired < actions.count, actions[fired].at <= t { actions[fired].run(); fired += 1 }
+        if t > 2.3, t < 4.1, let e = event(.leftMouseDragged, at: pointer(0.12 + (t - 2.3) / 1.8 * 0.55)) { track?.mouseDragged(with: e) }
+        if t > 4.4, t < 5.8, let e = event(.mouseMoved, at: pointer(0.67 + (t - 4.4) / 1.4 * 0.22)) { track?.mouseMoved(with: e) }
+        if t - lastGrab >= 1.0 / 15.0,
+           let image = CGWindowListCreateImage(.null, .optionIncludingWindow, windowID, [.boundsIgnoreFraming, .nominalResolution]) {
+            frames.append((t, image)); lastGrab = t
+        }
+        await sleep(0.004)
+    }
+    var list = ""
+    for (index, frame) in frames.enumerated() {
+        let name = String(format: "f%04d.png", index)
+        if let png = NSBitmapImageRep(cgImage: frame.image).representation(using: .png, properties: [:]) {
+            try? png.write(to: URL(fileURLWithPath: "\(outDir)/\(name)"))
+        }
+        let next = index + 1 < frames.count ? frames[index + 1].time : frame.time + 0.6
+        list += "file '\(name)'\nduration \(next - frame.time)\n"
+    }
+    if let last = frames.indices.last { list += "file '\(String(format: "f%04d.png", last))'\n" }
+    try? list.write(toFile: "\(outDir)/frames.txt", atomically: true, encoding: .utf8)
+    print("recorded \(frames.count) frames over \(String(format: "%.1f", frames.last?.time ?? 0)) s")
+    exit(0)
+}
+
 @MainActor
 func measure(_ controller: PlayerWindowController, engine: any PlaybackEngine, url: URL) async {
     let vc = controller.playerViewController
@@ -721,6 +812,12 @@ func start() {
     Task { @MainActor in
         await sleep(0.5)
         guard let window = controller.window else { exit(3) }
+        if let clip = ProcessInfo.processInfo.environment["NOVA_GIF"] {
+            await recordFrames(controller, engine: engine, url: URL(fileURLWithPath: clip), outDir: ProcessInfo.processInfo.environment["NOVA_SHOTS_DIR"] ?? ".")
+        }
+        if let clip = ProcessInfo.processInfo.environment["NOVA_SHOTS"] {
+            await screenshots(controller, engine: engine, url: URL(fileURLWithPath: clip), outDir: ProcessInfo.processInfo.environment["NOVA_SHOTS_DIR"] ?? ".")
+        }
         if let measured = ProcessInfo.processInfo.environment["NOVA_MEASURE"] {
             await measure(controller, engine: engine, url: URL(fileURLWithPath: measured))
         }

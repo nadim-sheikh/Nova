@@ -4,7 +4,7 @@
 //   swift Scripts/render-app-icons.swift            # installs into Nova/Assets.xcassets
 //   swift Scripts/render-app-icons.swift <outDir>
 //
-// The colours and proportions come from the original appicon-light.ico / appicon-dark.ico
+// The colours and proportions come from the original assets/icon-source/appicon-light.ico and appicon-dark.ico
 // artwork, redrawn as vectors so every icon size stays crisp and the corners are transparent.
 import AppKit
 
